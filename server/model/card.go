@@ -57,6 +57,10 @@ type Card struct {
 	// required: false
 	Title string `json:"title"`
 
+	// A stable unique id for referencing this task/card in the UI.
+	// required: false
+	TaskID string `json:"taskId"`
+
 	// An array of content block ids specifying the ordering of content for this card.
 	// required: false
 	ContentOrder []string `json:"contentOrder"`
@@ -199,6 +203,7 @@ func Card2Block(card *Card) *Block {
 	fields["contentOrder"] = card.ContentOrder
 	fields["icon"] = card.Icon
 	fields["isTemplate"] = card.IsTemplate
+	fields["taskId"] = card.TaskID
 	fields["properties"] = card.Properties
 
 	return &Block{
@@ -226,6 +231,7 @@ func Block2Card(block *Block) (*Card, error) {
 	contentOrder := make([]string, 0)
 	icon := ""
 	isTemplate := false
+	taskID := ""
 	properties := make(map[string]any)
 
 	if co, ok := block.Fields["contentOrder"]; ok {
@@ -261,6 +267,14 @@ func Block2Card(block *Block) (*Card, error) {
 		}
 	}
 
+	if taskIDAny, ok := block.Fields["taskId"]; ok {
+		if id, ok := taskIDAny.(string); ok {
+			taskID = id
+		} else {
+			return nil, ErrInvalidFieldType{"taskId"}
+		}
+	}
+
 	if props, ok := block.Fields["properties"]; ok {
 		if propMap, ok := props.(map[string]any); ok {
 			for k, v := range propMap {
@@ -277,6 +291,7 @@ func Block2Card(block *Block) (*Card, error) {
 		CreatedBy:    block.CreatedBy,
 		ModifiedBy:   block.ModifiedBy,
 		Title:        block.Title,
+		TaskID:       taskID,
 		ContentOrder: contentOrder,
 		Icon:         icon,
 		IsTemplate:   isTemplate,

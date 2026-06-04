@@ -42,6 +42,7 @@ func TestBlock2Card(t *testing.T) {
 		assert.Equal(t, []string{"acdxa8r8aht85pyoeuj1ed7tu8w", "73urm1huoupd4idzkdq5yaeuyay", "ay6sogs9owtd9xbyn49qt3395ko"}, card.ContentOrder)
 		assert.EqualValues(t, fields["icon"], card.Icon)
 		assert.EqualValues(t, fields["isTemplate"], card.IsTemplate)
+		assert.EqualValues(t, fields["taskId"], card.TaskID)
 		assert.EqualValues(t, fields["properties"], card.Properties)
 	})
 
@@ -54,6 +55,20 @@ func TestBlock2Card(t *testing.T) {
 	})
 }
 
+func TestCard2BlockIncludesTaskID(t *testing.T) {
+	card := &Card{
+		ID:           utils.NewID(utils.IDTypeCard),
+		BoardID:      utils.NewID(utils.IDTypeBoard),
+		Title:        "My card title",
+		TaskID:       "#9",
+		ContentOrder: []string{},
+		Properties:   map[string]any{},
+	}
+
+	block := Card2Block(card)
+	require.Equal(t, "#9", block.Fields["taskId"])
+}
+
 const sampleBlockFieldsJSON = `
 {
 	"contentOrder":[
@@ -63,6 +78,7 @@ const sampleBlockFieldsJSON = `
 	],
 	"icon":"🎨",
 	"isTemplate":false,
+	"taskId":"#7",
 	"properties":{
 	   "aa7swu9zz3ofdkcna3h867cum4y":"212-444-1234",
 	   "af6fcbb8-ca56-4b73-83eb-37437b9a667d":"77c539af-309c-4db1-8329-d20ef7e9eacd",

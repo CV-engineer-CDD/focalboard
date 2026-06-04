@@ -5,10 +5,16 @@ package app
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
 
 	"github.com/mattermost/focalboard/server/model"
 	"github.com/mattermost/focalboard/server/utils"
 )
+
+const cardTaskIDPrefix = "#"
 
 func (a *App) CreateCard(card *model.Card, boardID string, userID string, disableNotify bool) (*model.Card, error) {
 	// Convert the card struct to a block and insert the block.
@@ -21,6 +27,18 @@ func (a *App) CreateCard(card *model.Card, boardID string, userID string, disabl
 	card.CreateAt = now
 	card.UpdateAt = now
 	card.DeleteAt = 0
+
+	unlock := a.lockCardTaskIDs(boardID)
+	defer unlock()
+
+	if err := a.ensureCardTaskIDsLocked(boardID); err != nil {
+		return nil, fmt.Errorf("cannot backfill card task ids: %w", err)
+	}
+	taskID, err := a.nextCardTaskIDLocked(boardID)
+	if err != nil {
+		return nil, fmt.Errorf("cannot create card task id: %w", err)
+	}
+	card.TaskID = taskID
 
 	block := model.Card2Block(card)
 
@@ -37,7 +55,147 @@ func (a *App) CreateCard(card *model.Card, boardID string, userID string, disabl
 	return newCard, nil
 }
 
+func (a *App) nextCardTaskID(boardID string) (string, error) {
+	unlock := a.lockCardTaskIDs(boardID)
+	defer unlock()
+
+	return a.nextCardTaskIDLocked(boardID)
+}
+
+func (a *App) nextCardTaskIDLocked(boardID string) (string, error) {
+	opts := model.QueryBlocksOptions{
+		BoardID:   boardID,
+		BlockType: model.TypeCard,
+	}
+
+	blocks, err := a.store.GetBlocks(opts)
+	if err != nil {
+		return "", err
+	}
+
+	maxNumber := 0
+	for _, block := range blocks {
+		if block == nil || block.Fields == nil {
+			continue
+		}
+
+		taskID, _ := block.Fields["taskId"].(string)
+		if number, ok := cardTaskIDNumber(taskID); ok && number > maxNumber {
+			maxNumber = number
+		}
+	}
+
+	return fmt.Sprintf("%s%d", cardTaskIDPrefix, maxNumber+1), nil
+}
+
+func (a *App) ensureCardTaskIDs(boardID string) error {
+	unlock := a.lockCardTaskIDs(boardID)
+	defer unlock()
+
+	return a.ensureCardTaskIDsLocked(boardID)
+}
+
+func (a *App) ensureCardTaskIDsLocked(boardID string) error {
+	opts := model.QueryBlocksOptions{
+		BoardID:   boardID,
+		BlockType: model.TypeCard,
+	}
+
+	blocks, err := a.store.GetBlocks(opts)
+	if err != nil {
+		return err
+	}
+
+	cardBlocks := make([]*model.Block, 0, len(blocks))
+	for _, block := range blocks {
+		if block == nil {
+			continue
+		}
+		cardBlocks = append(cardBlocks, block)
+	}
+
+	sort.SliceStable(cardBlocks, func(i, j int) bool {
+		left := cardBlocks[i]
+		right := cardBlocks[j]
+		if left.CreateAt != right.CreateAt {
+			return left.CreateAt < right.CreateAt
+		}
+		return left.ID < right.ID
+	})
+
+	maxNumber := 0
+	usedNumbers := make(map[int]struct{})
+	missingBlocks := make([]*model.Block, 0)
+	for _, block := range cardBlocks {
+		taskID, _ := block.Fields["taskId"].(string)
+		if number, ok := cardTaskIDNumber(taskID); ok {
+			if number > maxNumber {
+				maxNumber = number
+			}
+			if _, exists := usedNumbers[number]; !exists {
+				usedNumbers[number] = struct{}{}
+				continue
+			}
+
+			block.Fields["taskId"] = ""
+			missingBlocks = append(missingBlocks, block)
+			continue
+		}
+
+		missingBlocks = append(missingBlocks, block)
+	}
+
+	for _, block := range missingBlocks {
+		maxNumber++
+		taskID := fmt.Sprintf("%s%d", cardTaskIDPrefix, maxNumber)
+		if block.Fields == nil {
+			block.Fields = make(map[string]interface{})
+		}
+		block.Fields["taskId"] = taskID
+		blockPatch := &model.BlockPatch{
+			UpdatedFields: map[string]interface{}{
+				"taskId": taskID,
+			},
+		}
+		if err := a.store.PatchBlock(block.ID, blockPatch, model.SystemUserID); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (a *App) lockCardTaskIDs(boardID string) func() {
+	a.cardTaskIDMux.Lock()
+	if a.cardTaskIDBoardMux == nil {
+		a.cardTaskIDBoardMux = make(map[string]*sync.Mutex)
+	}
+	boardMux := a.cardTaskIDBoardMux[boardID]
+	if boardMux == nil {
+		boardMux = &sync.Mutex{}
+		a.cardTaskIDBoardMux[boardID] = boardMux
+	}
+	a.cardTaskIDMux.Unlock()
+
+	boardMux.Lock()
+	return boardMux.Unlock
+}
+
+func cardTaskIDNumber(taskID string) (int, bool) {
+	trimmed := strings.TrimSpace(taskID)
+	trimmed = strings.TrimPrefix(trimmed, cardTaskIDPrefix)
+	number, err := strconv.Atoi(trimmed)
+	if err != nil || number <= 0 {
+		return 0, false
+	}
+	return number, true
+}
+
 func (a *App) GetCardsForBoard(boardID string, page int, perPage int) ([]*model.Card, error) {
+	if err := a.ensureCardTaskIDs(boardID); err != nil {
+		return nil, err
+	}
+
 	opts := model.QueryBlocksOptions{
 		BoardID:   boardID,
 		BlockType: model.TypeCard,

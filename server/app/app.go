@@ -70,6 +70,9 @@ type App struct {
 
 	cardLimitMux sync.RWMutex
 	cardLimit    int
+
+	cardTaskIDMux      sync.Mutex
+	cardTaskIDBoardMux map[string]*sync.Mutex
 }
 
 func (a *App) SetConfig(config *config.Configuration) {
@@ -94,6 +97,7 @@ func New(config *config.Configuration, wsAdapter ws.Adapter, services Services) 
 		permissions:         services.Permissions,
 		blockChangeNotifier: utils.NewCallbackQueue("blockChangeNotifier", blockChangeNotifierQueueSize, blockChangeNotifierPoolSize, services.Logger),
 		servicesAPI:         services.ServicesAPI,
+		cardTaskIDBoardMux:  make(map[string]*sync.Mutex),
 	}
 	app.initialize(services.SkipTemplateInit)
 	return app

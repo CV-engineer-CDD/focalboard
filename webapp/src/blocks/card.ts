@@ -6,6 +6,7 @@ import {Block, createBlock} from './block'
 type CardFields = {
     icon?: string
     isTemplate?: boolean
+    taskId: string
     properties: Record<string, string | string[]>
     contentOrder: Array<string | string[]>
 }
@@ -15,6 +16,7 @@ type Card = Block & {
 }
 
 function createCard(block?: Block): Card {
+    const newBlock = createBlock(block)
     const contentOrder: Array<string|string[]> = []
     const contentIds = block?.fields?.contentOrder?.filter((id: any) => id !== null)
 
@@ -28,10 +30,11 @@ function createCard(block?: Block): Card {
         }
     }
     return {
-        ...createBlock(block),
+        ...newBlock,
         type: 'card',
         fields: {
             icon: block?.fields.icon || '',
+            taskId: block?.fields.taskId || newBlock.id,
             properties: {...(block?.fields.properties || {})},
             contentOrder,
             isTemplate: block?.fields.isTemplate || false,

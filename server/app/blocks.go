@@ -17,6 +17,12 @@ func (a *App) GetBlocks(boardID, parentID string, blockType string) ([]*model.Bl
 		return []*model.Block{}, nil
 	}
 
+	if blockType == "" || blockType == model.TypeCard {
+		if err := a.ensureCardTaskIDs(boardID); err != nil {
+			return nil, err
+		}
+	}
+
 	if blockType != "" && parentID != "" {
 		return a.store.GetBlocksWithParentAndType(boardID, parentID, blockType)
 	}
@@ -37,9 +43,37 @@ func (a *App) DuplicateBlock(boardID string, blockID string, userID string, asTe
 		return nil, fmt.Errorf("cannot fetch board %s for DuplicateBlock: %w", boardID, err)
 	}
 
+	unlock := a.lockCardTaskIDs(boardID)
+	defer unlock()
+
+	if err := a.ensureCardTaskIDsLocked(boardID); err != nil {
+		return nil, fmt.Errorf("cannot backfill card task ids: %w", err)
+	}
+
 	blocks, err := a.store.DuplicateBlock(boardID, blockID, userID, asTemplate)
 	if err != nil {
 		return nil, err
+	}
+
+	if len(blocks) > 0 && blocks[0].Type == model.TypeCard {
+		taskID, tErr := a.nextCardTaskIDLocked(boardID)
+		if tErr != nil {
+			return nil, fmt.Errorf("cannot duplicate card task id: %w", tErr)
+		}
+
+		if blocks[0].Fields == nil {
+			blocks[0].Fields = make(map[string]interface{})
+		}
+		blocks[0].Fields["taskId"] = taskID
+
+		blockPatch := &model.BlockPatch{
+			UpdatedFields: map[string]interface{}{
+				"taskId": taskID,
+			},
+		}
+		if pErr := a.store.PatchBlock(blocks[0].ID, blockPatch, userID); pErr != nil {
+			return nil, fmt.Errorf("cannot update duplicated card task id: %w", pErr)
+		}
 	}
 
 	err = a.CopyAndUpdateCardFiles(boardID, userID, blocks, asTemplate)

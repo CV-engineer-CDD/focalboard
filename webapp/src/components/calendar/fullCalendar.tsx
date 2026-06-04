@@ -116,7 +116,7 @@ const CalendarFullView = (props: Props): JSX.Element|null => {
             return [{
                 id: card.id,
                 title: card.title,
-                extendedProps: {icon: card.fields.icon},
+                extendedProps: {icon: card.fields.icon, taskId: card.fields.taskId || card.id},
                 properties: card.fields.properties,
                 allDay: true,
                 start: dateFrom,
@@ -179,6 +179,12 @@ const CalendarFullView = (props: Props): JSX.Element|null => {
                     </MenuWrapper>}
                     <div className='octo-icontitle'>
                         { event.extendedProps.icon ? <div className='octo-icon'>{event.extendedProps.icon}</div> : undefined }
+                        <div
+                            className='octo-taskid'
+                            title={event.extendedProps.taskId}
+                        >
+                            {event.extendedProps.taskId}
+                        </div>
                         <div
                             className='fc-event-title'
                             key='__title'

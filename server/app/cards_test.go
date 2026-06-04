@@ -28,12 +28,29 @@ func TestCreateCard(t *testing.T) {
 		CreatedBy:    userID,
 		ModifiedBy:   userID,
 		Title:        "test card",
+		TaskID:       "#99",
 		ContentOrder: []string{utils.NewID(utils.IDTypeBlock), utils.NewID(utils.IDTypeBlock)},
 		Properties:   props,
 	}
 	block := model.Card2Block(card)
 
 	t.Run("success scenario", func(t *testing.T) {
+		existingBlocks := []*model.Block{
+			{
+				ID:      utils.NewID(utils.IDTypeCard),
+				BoardID: board.ID,
+				Type:    model.TypeCard,
+				Fields:  map[string]interface{}{"taskId": "#3"},
+			},
+		}
+		th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
+			BoardID:   board.ID,
+			BlockType: model.TypeCard,
+		}).Return(existingBlocks, nil)
+		th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
+			BoardID:   board.ID,
+			BlockType: model.TypeCard,
+		}).Return(existingBlocks, nil)
 		th.Store.EXPECT().GetBoard(board.ID).Return(board, nil)
 		th.Store.EXPECT().InsertBlock(gomock.AssignableToTypeOf(reflect.TypeOf(block)), userID).Return(nil)
 		th.Store.EXPECT().GetMembersForBoard(board.ID).Return([]*model.BoardMember{}, nil)
@@ -45,9 +62,19 @@ func TestCreateCard(t *testing.T) {
 		require.Equal(t, card.Title, newCard.Title)
 		require.Equal(t, card.ContentOrder, newCard.ContentOrder)
 		require.EqualValues(t, card.Properties, newCard.Properties)
+		require.Equal(t, "#4", newCard.TaskID)
 	})
 
 	t.Run("error scenario", func(t *testing.T) {
+		card.TaskID = ""
+		th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
+			BoardID:   board.ID,
+			BlockType: model.TypeCard,
+		}).Return(nil, nil)
+		th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
+			BoardID:   board.ID,
+			BlockType: model.TypeCard,
+		}).Return(nil, nil)
 		th.Store.EXPECT().GetBoard(board.ID).Return(board, nil)
 		th.Store.EXPECT().InsertBlock(gomock.AssignableToTypeOf(reflect.TypeOf(block)), userID).Return(blockError{"error"})
 
@@ -56,6 +83,98 @@ func TestCreateCard(t *testing.T) {
 		require.Error(t, err, "error")
 		require.Nil(t, newCard)
 	})
+}
+
+func TestCardTaskIDNumber(t *testing.T) {
+	t.Run("accepts hash prefixed number", func(t *testing.T) {
+		number, ok := cardTaskIDNumber("#42")
+		require.True(t, ok)
+		require.Equal(t, 42, number)
+	})
+
+	t.Run("accepts plain number", func(t *testing.T) {
+		number, ok := cardTaskIDNumber("42")
+		require.True(t, ok)
+		require.Equal(t, 42, number)
+	})
+
+	t.Run("rejects internal card ids", func(t *testing.T) {
+		_, ok := cardTaskIDNumber(utils.NewID(utils.IDTypeCard))
+		require.False(t, ok)
+	})
+
+	t.Run("rejects zero", func(t *testing.T) {
+		_, ok := cardTaskIDNumber("#0")
+		require.False(t, ok)
+	})
+}
+
+func TestEnsureCardTaskIDs(t *testing.T) {
+	th, tearDown := SetupTestHelper(t)
+	defer tearDown()
+
+	boardID := utils.NewID(utils.IDTypeBoard)
+	opts := model.QueryBlocksOptions{
+		BoardID:   boardID,
+		BlockType: model.TypeCard,
+	}
+
+	oldestMissing := &model.Block{
+		ID:       utils.NewID(utils.IDTypeCard),
+		BoardID:  boardID,
+		Type:     model.TypeCard,
+		CreateAt: 10,
+		Fields:   map[string]interface{}{},
+	}
+	existing := &model.Block{
+		ID:       utils.NewID(utils.IDTypeCard),
+		BoardID:  boardID,
+		Type:     model.TypeCard,
+		CreateAt: 20,
+		Fields:   map[string]interface{}{"taskId": "#4"},
+	}
+	invalid := &model.Block{
+		ID:       utils.NewID(utils.IDTypeCard),
+		BoardID:  boardID,
+		Type:     model.TypeCard,
+		CreateAt: 30,
+		Fields:   map[string]interface{}{"taskId": utils.NewID(utils.IDTypeCard)},
+	}
+	duplicate := &model.Block{
+		ID:       utils.NewID(utils.IDTypeCard),
+		BoardID:  boardID,
+		Type:     model.TypeCard,
+		CreateAt: 35,
+		Fields:   map[string]interface{}{"taskId": "#4"},
+	}
+	missingFields := &model.Block{
+		ID:       utils.NewID(utils.IDTypeCard),
+		BoardID:  boardID,
+		Type:     model.TypeCard,
+		CreateAt: 40,
+	}
+
+	th.Store.EXPECT().GetBlocks(opts).Return([]*model.Block{missingFields, invalid, duplicate, existing, oldestMissing}, nil)
+	th.Store.EXPECT().PatchBlock(oldestMissing.ID, &model.BlockPatch{
+		UpdatedFields: map[string]interface{}{"taskId": "#5"},
+	}, model.SystemUserID).Return(nil)
+	th.Store.EXPECT().PatchBlock(invalid.ID, &model.BlockPatch{
+		UpdatedFields: map[string]interface{}{"taskId": "#6"},
+	}, model.SystemUserID).Return(nil)
+	th.Store.EXPECT().PatchBlock(duplicate.ID, &model.BlockPatch{
+		UpdatedFields: map[string]interface{}{"taskId": "#7"},
+	}, model.SystemUserID).Return(nil)
+	th.Store.EXPECT().PatchBlock(missingFields.ID, &model.BlockPatch{
+		UpdatedFields: map[string]interface{}{"taskId": "#8"},
+	}, model.SystemUserID).Return(nil)
+
+	err := th.App.ensureCardTaskIDs(boardID)
+	require.NoError(t, err)
+	require.Equal(t, "#5", oldestMissing.Fields["taskId"])
+	require.Equal(t, "#6", invalid.Fields["taskId"])
+	require.Equal(t, "#7", duplicate.Fields["taskId"])
+	require.Equal(t, "#8", missingFields.Fields["taskId"])
+	require.Equal(t, "#4", existing.Fields["taskId"])
 }
 
 func TestGetCards(t *testing.T) {
@@ -78,6 +197,7 @@ func TestGetCards(t *testing.T) {
 			Type:     model.TypeCard,
 			Title:    fmt.Sprintf("card %d", i),
 			BoardID:  board.ID,
+			Fields:   map[string]interface{}{"taskId": fmt.Sprintf("#%d", i+1)},
 		}
 		blocks = append(blocks, card)
 	}
@@ -88,6 +208,7 @@ func TestGetCards(t *testing.T) {
 			BlockType: model.TypeCard,
 		}
 
+		th.Store.EXPECT().GetBlocks(opts).Return(blocks, nil)
 		th.Store.EXPECT().GetBlocks(opts).Return(blocks, nil)
 
 		cards, err := th.App.GetCardsForBoard(board.ID, 0, 0)

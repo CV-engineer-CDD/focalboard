@@ -131,6 +131,12 @@ const KanbanCard = (props: Props) => {
                 <div className='octo-icontitle'>
                     { card.fields.icon ? <div className='octo-icon'>{card.fields.icon}</div> : undefined }
                     <div
+                        className='octo-taskid'
+                        title={card.fields.taskId || card.id}
+                    >
+                        {card.fields.taskId || card.id}
+                    </div>
+                    <div
                         key='__title'
                         className='octo-titletext'
                     >

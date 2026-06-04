@@ -233,6 +233,13 @@ const CardDetail = (props: Props): JSX.Element|null => {
                     spellCheck={true}
                 />
 
+                <div
+                    className='CardDetail__taskid'
+                    title={props.card.fields.taskId || props.card.id}
+                >
+                    {props.card.fields.taskId || props.card.id}
+                </div>
+
                 {/* Hidden (limited) card copy + CTA */}
 
                 {limited && <div className='CardDetail__limited-wrapper'>

@@ -7,6 +7,18 @@
         line-height: 40px;
     }
 
+    .CardDetail__taskid {
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: rgba(var(--center-channel-color-rgb), 0.56);
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 18px;
+        margin: 4px 0 12px;
+    }
+
     .add-buttons {
         display: flex;
         flex-direction: column;

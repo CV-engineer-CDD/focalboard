@@ -168,6 +168,12 @@ const TableRow = (props: Props) => {
             >
                 <div className='octo-icontitle'>
                     <div className='octo-icon'>{card.fields.icon}</div>
+                    <div
+                        className='octo-taskid'
+                        title={card.fields.taskId || card.id}
+                    >
+                        {card.fields.taskId || card.id}
+                    </div>
                     <Editable
                         ref={titleRef}
                         value={title}
