@@ -21,7 +21,6 @@ import (
 	drivers "github.com/mattermost/morph/drivers"
 	mysql "github.com/mattermost/morph/drivers/mysql"
 	postgres "github.com/mattermost/morph/drivers/postgres"
-	sqlite "github.com/mattermost/morph/drivers/sqlite"
 	embedded "github.com/mattermost/morph/sources/embedded"
 
 	_ "github.com/lib/pq" // postgres driver
@@ -104,7 +103,7 @@ func (s *SQLStore) Migrate() error {
 	var err error
 
 	if s.dbType == model.SqliteDBType {
-		driver, err = sqlite.WithInstance(s.db)
+		driver, err = newSQLiteMigrationDriver(s.db)
 		if err != nil {
 			return err
 		}
