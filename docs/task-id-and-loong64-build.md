@@ -1,0 +1,107 @@
+# Card task IDs and linux-loong64 plugin build
+
+This fork adds a board-scoped task ID to every Boards card so cards can be
+referenced with a short stable value such as `#1` or `#42`.
+
+## Card task ID behavior
+
+- New cards receive their `taskId` on the server.
+- The value is scoped to one board and uses the next available numeric ID in
+  `#N` format.
+- Client-provided `taskId` values are ignored during card creation.
+- Duplicated cards receive a fresh `taskId`; the duplicate does not reuse the
+  source card ID.
+- Existing cards that do not have a numeric `taskId` are backfilled before card
+  reads, board block reads, card creation, and card duplication.
+- Backfill keeps the first occurrence of each existing numeric value unchanged,
+  finds the highest current number, then assigns missing IDs in stable card
+  order: `createAt`, then block ID.
+- Duplicate numeric legacy values are resolved deterministically: the earliest
+  card keeps the existing number and later duplicates are assigned new numbers
+  after the current maximum.
+- Invalid legacy values, including internal card UUIDs previously stored in
+  `taskId`, are treated as missing and replaced with `#N`.
+- Card task ID assignment is serialized per board inside the plugin process, so
+  concurrent card creates and duplicates in the same board do not receive the
+  same number.
+
+Backfill writes the generated field with the `system` user. This avoids exposing
+internal UUIDs as user-facing references and makes old cards usable with the same
+short ID format as new cards.
+
+The uniqueness guarantee is per board. In a multi-instance deployment where more
+than one plugin process writes to the same database at the same time, a database
+constraint or transactional sequence would be required for a strict cross-process
+guarantee because `taskId` is stored inside the block fields JSON.
+
+## UI display
+
+The task ID is shown in the main card surfaces:
+
+- kanban cards
+- table rows
+- gallery cards
+- calendar events
+- card detail header
+
+The UI falls back to the internal card ID only if the server returns a card that
+still has no `taskId`.
+
+## linux-loong64 build notes
+
+The Mattermost plugin manifest is limited to the `linux-loong64` server
+executable:
+
+```json
+"executables": {
+  "linux-loong64": "server/dist/plugin-linux-loong64"
+}
+```
+
+The plugin server build uses:
+
+```bash
+CGO_ENABLED=0 GOOS=linux GOARCH=loong64 go build -trimpath -o dist/plugin-linux-loong64
+```
+
+For this target, SQLite migration driver imports are excluded from the
+Focalboard store package on `linux/loong64`. The plugin build also uses newer
+`modernc.org/sqlite` and `modernc.org/libc` versions so the Mattermost server
+SQLite driver dependency can compile for `loong64`.
+
+## Verification commands
+
+Run server behavior tests:
+
+```bash
+cd server
+GOCACHE=/tmp/focalboard-gocache GOMODCACHE=/tmp/focalboard-gomodcache go test ./model ./app
+```
+
+Run the main webapp check:
+
+```bash
+cd webapp
+npm run check
+```
+
+Build the web assets and plugin:
+
+```bash
+cd webapp
+npm run pack
+
+cd ../mattermost-plugin/webapp
+npm run build
+
+cd ..
+make bundle
+```
+
+Verify the final plugin package contains only the `linux-loong64` executable:
+
+```bash
+tar -tzf mattermost-plugin/dist/focalboard-7.11.0.tar.gz | grep plugin-linux
+tar -xOzf mattermost-plugin/dist/focalboard-7.11.0.tar.gz focalboard/plugin.json
+file mattermost-plugin/server/dist/plugin-linux-loong64
+```
