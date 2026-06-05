@@ -15,9 +15,10 @@ import (
 )
 
 const (
-	cardTaskIDPrefix         = "#"
-	cardGlobalTaskIDPrefix   = "G-"
-	cardGlobalTaskIDProperty = "__globalTaskId"
+	cardTaskIDPrefix           = "#"
+	cardGlobalTaskIDPrefix     = "G-"
+	cardGlobalTaskIDProperty   = "__globalTaskId"
+	cardGlobalTaskIDCounterKey = "focalboard_card_global_task_id_max"
 )
 
 func (a *App) CreateCard(card *model.Card, boardID string, userID string, disableNotify bool) (*model.Card, error) {
@@ -51,7 +52,7 @@ func (a *App) prepareCardIDsForInsertLocked(boardID string, block *model.Block) 
 	if err := a.ensureCardTaskIDsLocked(boardID); err != nil {
 		return fmt.Errorf("cannot backfill card task ids: %w", err)
 	}
-	if err := a.ensureCardGlobalTaskIDsLocked(); err != nil {
+	if err := a.ensureCardGlobalTaskIDsForBoardLocked(boardID); err != nil {
 		return fmt.Errorf("cannot backfill global card task ids: %w", err)
 	}
 	taskID, err := a.nextCardTaskIDLocked(boardID)
@@ -118,35 +119,29 @@ func (a *App) nextCardTaskIDLocked(boardID string) (string, error) {
 }
 
 func (a *App) nextCardGlobalTaskIDLocked() (string, error) {
-	if a.cardGlobalTaskIDsBackfilled {
-		a.cardGlobalTaskIDMax++
-		return fmt.Sprintf("%s%d", cardGlobalTaskIDPrefix, a.cardGlobalTaskIDMax), nil
+	if !a.cardGlobalTaskIDCounterLoaded {
+		counterValue, err := a.store.GetSystemSetting(cardGlobalTaskIDCounterKey)
+		if err != nil {
+			return "", err
+		}
+
+		if counterValue != "" {
+			counter, cErr := strconv.Atoi(counterValue)
+			if cErr != nil {
+				return "", cErr
+			}
+			a.cardGlobalTaskIDMax = counter
+		} else {
+			a.cardGlobalTaskIDMax = int(utils.GetMillis())
+		}
+		a.cardGlobalTaskIDCounterLoaded = true
 	}
 
-	opts := model.QueryBlocksOptions{
-		BlockType: model.TypeCard,
-	}
-
-	blocks, err := a.store.GetBlocks(opts)
-	if err != nil {
+	a.cardGlobalTaskIDMax++
+	if err := a.store.SetSystemSetting(cardGlobalTaskIDCounterKey, strconv.Itoa(a.cardGlobalTaskIDMax)); err != nil {
 		return "", err
 	}
-
-	maxNumber := 0
-	for _, block := range blocks {
-		if block == nil || block.Fields == nil {
-			continue
-		}
-
-		globalTaskID, _ := block.Fields["globalTaskId"].(string)
-		if number, ok := cardGlobalTaskIDNumber(globalTaskID); ok && number > maxNumber {
-			maxNumber = number
-		}
-	}
-
-	maxNumber++
-	a.cardGlobalTaskIDMax = maxNumber
-	return fmt.Sprintf("%s%d", cardGlobalTaskIDPrefix, maxNumber), nil
+	return fmt.Sprintf("%s%d", cardGlobalTaskIDPrefix, a.cardGlobalTaskIDMax), nil
 }
 
 func (a *App) ensureCardTaskIDs(boardID string) error {
@@ -174,9 +169,20 @@ func (a *App) ensureCardTaskIDsLocked(boardID string) error {
 		return err
 	}
 
+	return a.ensureCardTaskIDsForBlocksLocked(boardID, blocks)
+}
+
+func (a *App) ensureCardTaskIDsForBlocksLocked(boardID string, blocks []*model.Block) error {
+	a.cardTaskIDStateMux.Lock()
+	if a.cardTaskIDBackfilledBoards[boardID] {
+		a.cardTaskIDStateMux.Unlock()
+		return nil
+	}
+	a.cardTaskIDStateMux.Unlock()
+
 	cardBlocks := make([]*model.Block, 0, len(blocks))
 	for _, block := range blocks {
-		if block == nil {
+		if block == nil || block.Type != model.TypeCard {
 			continue
 		}
 		cardBlocks = append(cardBlocks, block)
@@ -237,19 +243,20 @@ func (a *App) ensureCardTaskIDsLocked(boardID string) error {
 	return nil
 }
 
-func (a *App) ensureCardGlobalTaskIDs() error {
+func (a *App) ensureCardGlobalTaskIDsForBoard(boardID string) error {
 	a.cardGlobalTaskIDMux.Lock()
 	defer a.cardGlobalTaskIDMux.Unlock()
 
-	return a.ensureCardGlobalTaskIDsLocked()
+	return a.ensureCardGlobalTaskIDsForBoardLocked(boardID)
 }
 
-func (a *App) ensureCardGlobalTaskIDsLocked() error {
-	if a.cardGlobalTaskIDsBackfilled {
+func (a *App) ensureCardGlobalTaskIDsForBoardLocked(boardID string) error {
+	if a.cardGlobalTaskIDBackfilledBoards[boardID] {
 		return nil
 	}
 
 	opts := model.QueryBlocksOptions{
+		BoardID:   boardID,
 		BlockType: model.TypeCard,
 	}
 
@@ -258,9 +265,17 @@ func (a *App) ensureCardGlobalTaskIDsLocked() error {
 		return err
 	}
 
+	return a.ensureCardGlobalTaskIDsForBlocksLocked(boardID, blocks)
+}
+
+func (a *App) ensureCardGlobalTaskIDsForBlocksLocked(boardID string, blocks []*model.Block) error {
+	if a.cardGlobalTaskIDBackfilledBoards[boardID] {
+		return nil
+	}
+
 	cardBlocks := make([]*model.Block, 0, len(blocks))
 	for _, block := range blocks {
-		if block == nil {
+		if block == nil || block.Type != model.TypeCard {
 			continue
 		}
 		cardBlocks = append(cardBlocks, block)
@@ -275,15 +290,11 @@ func (a *App) ensureCardGlobalTaskIDsLocked() error {
 		return left.ID < right.ID
 	})
 
-	maxNumber := 0
 	usedNumbers := make(map[int]struct{})
 	missingBlocks := make([]*model.Block, 0)
 	for _, block := range cardBlocks {
 		globalTaskID, _ := block.Fields["globalTaskId"].(string)
 		if number, ok := cardGlobalTaskIDNumber(globalTaskID); ok {
-			if number > maxNumber {
-				maxNumber = number
-			}
 			if _, exists := usedNumbers[number]; !exists {
 				usedNumbers[number] = struct{}{}
 				if setCardGlobalTaskIDProperty(block, globalTaskID) {
@@ -303,8 +314,10 @@ func (a *App) ensureCardGlobalTaskIDsLocked() error {
 	}
 
 	for _, block := range missingBlocks {
-		maxNumber++
-		globalTaskID := fmt.Sprintf("%s%d", cardGlobalTaskIDPrefix, maxNumber)
+		globalTaskID, err := a.nextCardGlobalTaskIDLocked()
+		if err != nil {
+			return err
+		}
 		if block.Fields == nil {
 			block.Fields = make(map[string]interface{})
 		}
@@ -315,8 +328,7 @@ func (a *App) ensureCardGlobalTaskIDsLocked() error {
 		}
 	}
 
-	a.cardGlobalTaskIDMax = maxNumber
-	a.cardGlobalTaskIDsBackfilled = true
+	a.cardGlobalTaskIDBackfilledBoards[boardID] = true
 	return nil
 }
 
@@ -392,7 +404,7 @@ func (a *App) GetCardsForBoard(boardID string, page int, perPage int) ([]*model.
 	if err := a.ensureCardTaskIDs(boardID); err != nil {
 		return nil, err
 	}
-	if err := a.ensureCardGlobalTaskIDs(); err != nil {
+	if err := a.ensureCardGlobalTaskIDsForBoard(boardID); err != nil {
 		return nil, err
 	}
 

@@ -1,7 +1,8 @@
 # Card task IDs and linux-loong64 plugin build
 
-This fork adds a board-scoped task ID to every Boards card so cards can be
-referenced with a short stable value such as `#1` or `#42`.
+This fork adds a board-scoped task ID and a plugin-wide global task ID to every
+Boards card so cards can be referenced with short stable values such as `#1`
+inside one board and `G-1700000000001` across boards.
 
 ## Card task ID behavior
 
@@ -46,6 +47,18 @@ The task ID is shown in the main card surfaces:
 
 The UI falls back to the internal card ID only if the server returns a card that
 still has no `taskId`.
+
+## Global task ID behavior
+
+- New cards also receive a `globalTaskId` in `G-N` format.
+- The same value is stored in `fields.properties.__globalTaskId` so it appears
+  as a read-only `Global ID` property in the card detail view.
+- Global IDs are assigned from the persisted `system_settings` key
+  `focalboard_card_global_task_id_max`.
+- Existing cards are migrated lazily for the board currently being opened or
+  written. Opening one board does not scan cards from every other board.
+- If the persisted counter does not exist yet, it starts from the current
+  millisecond timestamp to avoid colliding with earlier small `G-N` values.
 
 ## linux-loong64 build notes
 
@@ -101,7 +114,7 @@ make bundle
 Verify the final plugin package contains only the `linux-loong64` executable:
 
 ```bash
-tar -tzf mattermost-plugin/dist/focalboard-7.11.0.tar.gz | grep plugin-linux
-tar -xOzf mattermost-plugin/dist/focalboard-7.11.0.tar.gz focalboard/plugin.json
+tar -tzf mattermost-plugin/dist/focalboard-7.11.1.tar.gz | grep plugin-linux
+tar -xOzf mattermost-plugin/dist/focalboard-7.11.1.tar.gz focalboard/plugin.json
 file mattermost-plugin/server/dist/plugin-linux-loong64
 ```

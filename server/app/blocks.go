@@ -21,7 +21,7 @@ func (a *App) GetBlocks(boardID, parentID string, blockType string) ([]*model.Bl
 		if err := a.ensureCardTaskIDs(boardID); err != nil {
 			return nil, err
 		}
-		if err := a.ensureCardGlobalTaskIDs(); err != nil {
+		if err := a.ensureCardGlobalTaskIDsForBoard(boardID); err != nil {
 			return nil, err
 		}
 	}
@@ -54,7 +54,7 @@ func (a *App) DuplicateBlock(boardID string, blockID string, userID string, asTe
 	if err := a.ensureCardTaskIDsLocked(boardID); err != nil {
 		return nil, fmt.Errorf("cannot backfill card task ids: %w", err)
 	}
-	if err := a.ensureCardGlobalTaskIDsLocked(); err != nil {
+	if err := a.ensureCardGlobalTaskIDsForBoardLocked(boardID); err != nil {
 		return nil, fmt.Errorf("cannot backfill global card task ids: %w", err)
 	}
 
@@ -328,7 +328,7 @@ func (a *App) InsertBlocksAndNotify(blocks []*model.Block, modifiedByID string, 
 		if err := a.ensureCardTaskIDsLocked(boardID); err != nil {
 			return nil, err
 		}
-		if err := a.ensureCardGlobalTaskIDsLocked(); err != nil {
+		if err := a.ensureCardGlobalTaskIDsForBoardLocked(boardID); err != nil {
 			return nil, err
 		}
 	}
@@ -516,14 +516,24 @@ func (a *App) GetBlockCountsByType() (map[string]int64, error) {
 }
 
 func (a *App) GetBlocksForBoard(boardID string) ([]*model.Block, error) {
-	if err := a.ensureCardTaskIDs(boardID); err != nil {
-		return nil, err
-	}
-	if err := a.ensureCardGlobalTaskIDs(); err != nil {
+	blocks, err := a.store.GetBlocksForBoard(boardID)
+	if err != nil {
 		return nil, err
 	}
 
-	return a.store.GetBlocksForBoard(boardID)
+	unlock := a.lockCardTaskIDs(boardID)
+	defer unlock()
+	a.cardGlobalTaskIDMux.Lock()
+	defer a.cardGlobalTaskIDMux.Unlock()
+
+	if err := a.ensureCardTaskIDsForBlocksLocked(boardID, blocks); err != nil {
+		return nil, err
+	}
+	if err := a.ensureCardGlobalTaskIDsForBlocksLocked(boardID, blocks); err != nil {
+		return nil, err
+	}
+
+	return blocks, nil
 }
 
 func (a *App) notifyBlockChanged(action notify.Action, block *model.Block, oldBlock *model.Block, modifiedByID string) {

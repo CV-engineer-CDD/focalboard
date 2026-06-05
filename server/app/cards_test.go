@@ -55,8 +55,10 @@ func TestCreateCard(t *testing.T) {
 			BlockType: model.TypeCard,
 		}).Return(existingBlocks, nil)
 		th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
+			BoardID:   board.ID,
 			BlockType: model.TypeCard,
 		}).Return(existingBlocks, nil)
+		expectCardGlobalTaskIDCounter(th, "3")
 		th.Store.EXPECT().GetBoard(board.ID).Return(board, nil)
 		th.Store.EXPECT().InsertBlock(gomock.AssignableToTypeOf(reflect.TypeOf(block)), userID).Return(nil)
 		th.Store.EXPECT().GetMembersForBoard(board.ID).Return([]*model.BoardMember{}, nil)
@@ -255,6 +257,7 @@ func TestCardTaskIDLifecycleUsesUniqueIDs(t *testing.T) {
 		},
 	).AnyTimes()
 	th.Store.EXPECT().GetBoard(boardID).Return(board, nil).AnyTimes()
+	expectCardGlobalTaskIDCounter(th, "2")
 	th.Store.EXPECT().InsertBlock(gomock.Any(), userID).DoAndReturn(func(block *model.Block, _ string) error {
 		blocksMux.Lock()
 		defer blocksMux.Unlock()
@@ -378,7 +381,13 @@ func TestGetCards(t *testing.T) {
 			Type:     model.TypeCard,
 			Title:    fmt.Sprintf("card %d", i),
 			BoardID:  board.ID,
-			Fields:   map[string]interface{}{"taskId": fmt.Sprintf("#%d", i+1)},
+			Fields: map[string]interface{}{
+				"taskId":       fmt.Sprintf("#%d", i+1),
+				"globalTaskId": fmt.Sprintf("G-%d", i+1),
+				"properties": map[string]interface{}{
+					cardGlobalTaskIDProperty: fmt.Sprintf("G-%d", i+1),
+				},
+			},
 		}
 		blocks = append(blocks, card)
 	}
@@ -389,6 +398,7 @@ func TestGetCards(t *testing.T) {
 			BlockType: model.TypeCard,
 		}
 
+		th.Store.EXPECT().GetBlocks(opts).Return(blocks, nil)
 		th.Store.EXPECT().GetBlocks(opts).Return(blocks, nil)
 		th.Store.EXPECT().GetBlocks(opts).Return(blocks, nil)
 
@@ -673,4 +683,19 @@ func requireGlobalTaskIDByBlockTitle(t *testing.T, blocks []*model.Block, title 
 		}
 	}
 	require.Fail(t, "block title not found", title)
+}
+
+func expectCardGlobalTaskIDCounter(th *TestHelper, initialValue string) {
+	counterValue := initialValue
+	th.Store.EXPECT().GetSystemSetting(cardGlobalTaskIDCounterKey).DoAndReturn(
+		func(string) (string, error) {
+			return counterValue, nil
+		},
+	).AnyTimes()
+	th.Store.EXPECT().SetSystemSetting(cardGlobalTaskIDCounterKey, gomock.Any()).DoAndReturn(
+		func(_ string, value string) error {
+			counterValue = value
+			return nil
+		},
+	).AnyTimes()
 }

@@ -94,9 +94,11 @@ property template，避免污染用户自定义列配置。
 性能修复：
 
 - 每个 board 的旧 `taskId` 迁移只在当前进程内执行一次。
-- 全局 `globalTaskId` 迁移只在当前进程内执行一次。
-- 迁移完成后缓存当前最大编号。
-- 新建/复制卡片直接从缓存最大值加一，不再重复全量扫描。
+- 全局 `globalTaskId` 不再通过扫描所有 board 恢复最大值。
+- 全局编号改用 `system_settings` 中的持久计数器 `focalboard_card_global_task_id_max`。
+- 旧 `globalTaskId` 只在当前打开或写入的 board 内懒迁移，并在进程内按 board 缓存。
+- 打开整板时复用已经取回的 board blocks 做迁移，避免打开前额外查询一次当前 board 卡片。
+- 新建/复制卡片直接从持久计数器递增，不再重复全量扫描。
 - board 内编号仍使用 board 级锁。
 - 全局编号使用全局锁。
 - 缓存 map 增加独立锁，避免不同 board 并发写缓存导致 Go map race。
@@ -189,7 +191,8 @@ property template，避免污染用户自定义列配置。
 
 问题：全局扫描所有卡片成本高。
 
-修复：迁移只执行一次，缓存最大值，新建/复制只递增。
+修复：全局 ID 使用 `system_settings` 持久计数器；打开 board 只迁移当前 board
+中的旧卡片，不再扫描所有 board。
 
 ### loong64 sqlite 依赖编译问题
 
@@ -227,8 +230,8 @@ property template，避免污染用户自定义列配置。
 打开旧 board：
 
 - 首次加载时迁移旧 `taskId`
-- 首次全局迁移时迁移旧 `globalTaskId`
-- 迁移后使用缓存，避免重复扫描
+- 首次加载当前 board 时迁移旧 `globalTaskId`
+- 迁移后按 board 使用进程内缓存，避免重复扫描
 
 显示：
 
@@ -284,13 +287,14 @@ file mattermost-plugin/server/dist/plugin-linux-loong64
 - `globalTaskId` 的严格唯一范围是单插件进程串行写入场景。
 - 如果同一个数据库有多个插件进程同时写入，严格跨进程唯一需要数据库事务序列或唯一约束。
 - 当前 ID 存在 block fields JSON 中，不是独立索引列。
-- 迁移缓存是进程内缓存。插件重启后会重新扫描一次以恢复最大编号。
+- 全局编号计数器持久化在 `system_settings`；插件重启后不会为了恢复最大值扫描全库。
+- 如果系统设置里没有旧计数器，新计数器从当前毫秒时间戳起步，避免和早期小编号冲突。
 
 ## 产物
 
 最终插件包生成在工作区根目录：
 
 ```text
-focalboard-7.11.0-taskid-linux-loong64.tar.gz
-focalboard-7.11.0-taskid-linux-loong64.tar.gz.zst
+focalboard-7.11.1-taskid-linux-loong64.tar.gz
+focalboard-7.11.1-taskid-linux-loong64.tar.gz.zst
 ```

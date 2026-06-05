@@ -71,14 +71,15 @@ type App struct {
 	cardLimitMux sync.RWMutex
 	cardLimit    int
 
-	cardTaskIDMux               sync.Mutex
-	cardTaskIDBoardMux          map[string]*sync.Mutex
-	cardTaskIDStateMux          sync.Mutex
-	cardTaskIDBackfilledBoards  map[string]bool
-	cardTaskIDMaxByBoard        map[string]int
-	cardGlobalTaskIDMux         sync.Mutex
-	cardGlobalTaskIDsBackfilled bool
-	cardGlobalTaskIDMax         int
+	cardTaskIDMux                    sync.Mutex
+	cardTaskIDBoardMux               map[string]*sync.Mutex
+	cardTaskIDStateMux               sync.Mutex
+	cardTaskIDBackfilledBoards       map[string]bool
+	cardTaskIDMaxByBoard             map[string]int
+	cardGlobalTaskIDMux              sync.Mutex
+	cardGlobalTaskIDBackfilledBoards map[string]bool
+	cardGlobalTaskIDCounterLoaded    bool
+	cardGlobalTaskIDMax              int
 }
 
 func (a *App) SetConfig(config *config.Configuration) {
@@ -91,21 +92,22 @@ func (a *App) GetConfig() *config.Configuration {
 
 func New(config *config.Configuration, wsAdapter ws.Adapter, services Services) *App {
 	app := &App{
-		config:                     config,
-		store:                      services.Store,
-		auth:                       services.Auth,
-		wsAdapter:                  wsAdapter,
-		filesBackend:               services.FilesBackend,
-		webhook:                    services.Webhook,
-		metrics:                    services.Metrics,
-		notifications:              services.Notifications,
-		logger:                     services.Logger,
-		permissions:                services.Permissions,
-		blockChangeNotifier:        utils.NewCallbackQueue("blockChangeNotifier", blockChangeNotifierQueueSize, blockChangeNotifierPoolSize, services.Logger),
-		servicesAPI:                services.ServicesAPI,
-		cardTaskIDBoardMux:         make(map[string]*sync.Mutex),
-		cardTaskIDBackfilledBoards: make(map[string]bool),
-		cardTaskIDMaxByBoard:       make(map[string]int),
+		config:                           config,
+		store:                            services.Store,
+		auth:                             services.Auth,
+		wsAdapter:                        wsAdapter,
+		filesBackend:                     services.FilesBackend,
+		webhook:                          services.Webhook,
+		metrics:                          services.Metrics,
+		notifications:                    services.Notifications,
+		logger:                           services.Logger,
+		permissions:                      services.Permissions,
+		blockChangeNotifier:              utils.NewCallbackQueue("blockChangeNotifier", blockChangeNotifierQueueSize, blockChangeNotifierPoolSize, services.Logger),
+		servicesAPI:                      services.ServicesAPI,
+		cardTaskIDBoardMux:               make(map[string]*sync.Mutex),
+		cardTaskIDBackfilledBoards:       make(map[string]bool),
+		cardTaskIDMaxByBoard:             make(map[string]int),
+		cardGlobalTaskIDBackfilledBoards: make(map[string]bool),
 	}
 	app.initialize(services.SkipTemplateInit)
 	return app
