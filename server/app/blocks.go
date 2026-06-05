@@ -21,6 +21,9 @@ func (a *App) GetBlocks(boardID, parentID string, blockType string) ([]*model.Bl
 		if err := a.ensureCardTaskIDs(boardID); err != nil {
 			return nil, err
 		}
+		if err := a.ensureCardGlobalTaskIDs(); err != nil {
+			return nil, err
+		}
 	}
 
 	if blockType != "" && parentID != "" {
@@ -45,9 +48,14 @@ func (a *App) DuplicateBlock(boardID string, blockID string, userID string, asTe
 
 	unlock := a.lockCardTaskIDs(boardID)
 	defer unlock()
+	a.cardGlobalTaskIDMux.Lock()
+	defer a.cardGlobalTaskIDMux.Unlock()
 
 	if err := a.ensureCardTaskIDsLocked(boardID); err != nil {
 		return nil, fmt.Errorf("cannot backfill card task ids: %w", err)
+	}
+	if err := a.ensureCardGlobalTaskIDsLocked(); err != nil {
+		return nil, fmt.Errorf("cannot backfill global card task ids: %w", err)
 	}
 
 	blocks, err := a.store.DuplicateBlock(boardID, blockID, userID, asTemplate)
@@ -65,10 +73,18 @@ func (a *App) DuplicateBlock(boardID string, blockID string, userID string, asTe
 			blocks[0].Fields = make(map[string]interface{})
 		}
 		blocks[0].Fields["taskId"] = taskID
+		globalTaskID, gErr := a.nextCardGlobalTaskIDLocked()
+		if gErr != nil {
+			return nil, fmt.Errorf("cannot duplicate global card task id: %w", gErr)
+		}
+		blocks[0].Fields["globalTaskId"] = globalTaskID
+		setCardGlobalTaskIDProperty(blocks[0], globalTaskID)
 
 		blockPatch := &model.BlockPatch{
 			UpdatedFields: map[string]interface{}{
-				"taskId": taskID,
+				"taskId":       taskID,
+				"globalTaskId": globalTaskID,
+				"properties":   blocks[0].Fields["properties"],
 			},
 		}
 		if pErr := a.store.PatchBlock(blocks[0].ID, blockPatch, userID); pErr != nil {
@@ -206,7 +222,9 @@ func (a *App) InsertBlockAndNotify(block *model.Block, modifiedByID string, disa
 	var unlock func()
 	if block.Type == model.TypeCard {
 		unlock = a.lockCardTaskIDs(block.BoardID)
-		if err := a.prepareCardTaskIDForInsertLocked(block.BoardID, block); err != nil {
+		a.cardGlobalTaskIDMux.Lock()
+		if err := a.prepareCardIDsForInsertLocked(block.BoardID, block); err != nil {
+			a.cardGlobalTaskIDMux.Unlock()
 			unlock()
 			return err
 		}
@@ -214,6 +232,7 @@ func (a *App) InsertBlockAndNotify(block *model.Block, modifiedByID string, disa
 
 	err := a.store.InsertBlock(block, modifiedByID)
 	if unlock != nil {
+		a.cardGlobalTaskIDMux.Unlock()
 		unlock()
 	}
 	if err == nil {
@@ -303,8 +322,13 @@ func (a *App) InsertBlocksAndNotify(blocks []*model.Block, modifiedByID string, 
 	if hasCards {
 		unlock = a.lockCardTaskIDs(boardID)
 		defer unlock()
+		a.cardGlobalTaskIDMux.Lock()
+		defer a.cardGlobalTaskIDMux.Unlock()
 
 		if err := a.ensureCardTaskIDsLocked(boardID); err != nil {
+			return nil, err
+		}
+		if err := a.ensureCardGlobalTaskIDsLocked(); err != nil {
 			return nil, err
 		}
 	}
@@ -330,10 +354,16 @@ func (a *App) InsertBlocksAndNotify(blocks []*model.Block, modifiedByID string, 
 			if tErr != nil {
 				return nil, fmt.Errorf("cannot insert card task id: %w", tErr)
 			}
+			globalTaskID, gErr := a.nextCardGlobalTaskIDLocked()
+			if gErr != nil {
+				return nil, fmt.Errorf("cannot insert global card task id: %w", gErr)
+			}
 			if blocks[i].Fields == nil {
 				blocks[i].Fields = make(map[string]interface{})
 			}
 			blocks[i].Fields["taskId"] = taskID
+			blocks[i].Fields["globalTaskId"] = globalTaskID
+			setCardGlobalTaskIDProperty(blocks[i], globalTaskID)
 		}
 
 		err := a.store.InsertBlock(blocks[i], modifiedByID)
@@ -487,6 +517,9 @@ func (a *App) GetBlockCountsByType() (map[string]int64, error) {
 
 func (a *App) GetBlocksForBoard(boardID string) ([]*model.Block, error) {
 	if err := a.ensureCardTaskIDs(boardID); err != nil {
+		return nil, err
+	}
+	if err := a.ensureCardGlobalTaskIDs(); err != nil {
 		return nil, err
 	}
 

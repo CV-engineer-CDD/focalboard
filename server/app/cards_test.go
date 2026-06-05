@@ -41,7 +41,13 @@ func TestCreateCard(t *testing.T) {
 				ID:      utils.NewID(utils.IDTypeCard),
 				BoardID: board.ID,
 				Type:    model.TypeCard,
-				Fields:  map[string]interface{}{"taskId": "#3"},
+				Fields: map[string]interface{}{
+					"taskId":       "#3",
+					"globalTaskId": "G-3",
+					"properties": map[string]interface{}{
+						cardGlobalTaskIDProperty: "G-3",
+					},
+				},
 			},
 		}
 		th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
@@ -49,7 +55,6 @@ func TestCreateCard(t *testing.T) {
 			BlockType: model.TypeCard,
 		}).Return(existingBlocks, nil)
 		th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
-			BoardID:   board.ID,
 			BlockType: model.TypeCard,
 		}).Return(existingBlocks, nil)
 		th.Store.EXPECT().GetBoard(board.ID).Return(board, nil)
@@ -62,20 +67,13 @@ func TestCreateCard(t *testing.T) {
 		require.Equal(t, card.BoardID, newCard.BoardID)
 		require.Equal(t, card.Title, newCard.Title)
 		require.Equal(t, card.ContentOrder, newCard.ContentOrder)
-		require.EqualValues(t, card.Properties, newCard.Properties)
 		require.Equal(t, "#4", newCard.TaskID)
+		require.Equal(t, "G-4", newCard.GlobalTaskID)
+		require.Equal(t, "G-4", newCard.Properties[cardGlobalTaskIDProperty])
 	})
 
 	t.Run("error scenario", func(t *testing.T) {
 		card.TaskID = ""
-		th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
-			BoardID:   board.ID,
-			BlockType: model.TypeCard,
-		}).Return(nil, nil)
-		th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
-			BoardID:   board.ID,
-			BlockType: model.TypeCard,
-		}).Return(nil, nil)
 		th.Store.EXPECT().GetBoard(board.ID).Return(board, nil)
 		th.Store.EXPECT().InsertBlock(gomock.AssignableToTypeOf(reflect.TypeOf(block)), userID).Return(blockError{"error"})
 
@@ -202,7 +200,7 @@ func TestCardTaskIDLifecycleUsesUniqueIDs(t *testing.T) {
 			Type:     model.TypeCard,
 			Title:    "old existing task id",
 			CreateAt: 20,
-			Fields:   map[string]interface{}{"taskId": "#2"},
+			Fields:   map[string]interface{}{"taskId": "#2", "globalTaskId": "G-2"},
 		},
 		{
 			ID:       utils.NewID(utils.IDTypeCard),
@@ -210,7 +208,7 @@ func TestCardTaskIDLifecycleUsesUniqueIDs(t *testing.T) {
 			Type:     model.TypeCard,
 			Title:    "old duplicate task id",
 			CreateAt: 30,
-			Fields:   map[string]interface{}{"taskId": "#2"},
+			Fields:   map[string]interface{}{"taskId": "#2", "globalTaskId": "G-2"},
 		},
 		{
 			ID:       utils.NewID(utils.IDTypeCard),
@@ -218,33 +216,31 @@ func TestCardTaskIDLifecycleUsesUniqueIDs(t *testing.T) {
 			Type:     model.TypeCard,
 			Title:    "old internal id task id",
 			CreateAt: 40,
-			Fields:   map[string]interface{}{"taskId": utils.NewID(utils.IDTypeCard)},
+			Fields:   map[string]interface{}{"taskId": utils.NewID(utils.IDTypeCard), "globalTaskId": utils.NewID(utils.IDTypeCard)},
 		},
 	}
 
-	cardBlocks := func() []*model.Block {
+	cardBlocks := func(boardFilter string) []*model.Block {
 		out := make([]*model.Block, 0, len(blocks))
 		for _, block := range blocks {
-			if block.BoardID == boardID && block.Type == model.TypeCard {
+			if (boardFilter == "" || block.BoardID == boardFilter) && block.Type == model.TypeCard {
 				out = append(out, cloneBlockForTest(block))
 			}
 		}
 		return out
 	}
 
-	th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
-		BoardID:   boardID,
-		BlockType: model.TypeCard,
-	}).DoAndReturn(func(model.QueryBlocksOptions) ([]*model.Block, error) {
+	th.Store.EXPECT().GetBlocks(gomock.Any()).DoAndReturn(func(opts model.QueryBlocksOptions) ([]*model.Block, error) {
 		blocksMux.Lock()
 		defer blocksMux.Unlock()
-		return cardBlocks(), nil
+		require.Equal(t, model.BlockType(model.TypeCard), opts.BlockType)
+		return cardBlocks(opts.BoardID), nil
 	}).AnyTimes()
 	th.Store.EXPECT().GetBlocksForBoard(boardID).DoAndReturn(func(string) ([]*model.Block, error) {
 		blocksMux.Lock()
 		defer blocksMux.Unlock()
-		return cardBlocks(), nil
-	})
+		return cardBlocks(boardID), nil
+	}).AnyTimes()
 	th.Store.EXPECT().PatchBlock(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 		func(blockID string, blockPatch *model.BlockPatch, userID string) error {
 			blocksMux.Lock()
@@ -290,6 +286,11 @@ func TestCardTaskIDLifecycleUsesUniqueIDs(t *testing.T) {
 	requireTaskIDByTitle(t, cards, "old existing task id", "#2")
 	requireTaskIDByTitle(t, cards, "old duplicate task id", "#4")
 	requireTaskIDByTitle(t, cards, "old internal id task id", "#5")
+	requireUniqueGlobalTaskIDs(t, cards)
+	requireGlobalTaskIDByTitle(t, cards, "old missing task id", "G-3")
+	requireGlobalTaskIDByTitle(t, cards, "old existing task id", "G-2")
+	requireGlobalTaskIDByTitle(t, cards, "old duplicate task id", "G-4")
+	requireGlobalTaskIDByTitle(t, cards, "old internal id task id", "G-5")
 
 	allBlocks, err := th.App.GetBlocksForBoard(boardID)
 	require.NoError(t, err)
@@ -297,6 +298,10 @@ func TestCardTaskIDLifecycleUsesUniqueIDs(t *testing.T) {
 	requireTaskIDByBlockTitle(t, allBlocks, "old existing task id", "#2")
 	requireTaskIDByBlockTitle(t, allBlocks, "old duplicate task id", "#4")
 	requireTaskIDByBlockTitle(t, allBlocks, "old internal id task id", "#5")
+	requireGlobalTaskIDByBlockTitle(t, allBlocks, "old missing task id", "G-3")
+	requireGlobalTaskIDByBlockTitle(t, allBlocks, "old existing task id", "G-2")
+	requireGlobalTaskIDByBlockTitle(t, allBlocks, "old duplicate task id", "G-4")
+	requireGlobalTaskIDByBlockTitle(t, allBlocks, "old internal id task id", "G-5")
 
 	const concurrentCards = 10
 	var wg sync.WaitGroup
@@ -322,6 +327,9 @@ func TestCardTaskIDLifecycleUsesUniqueIDs(t *testing.T) {
 			if cErr == nil {
 				serverTaskID, _ := newBlocks[0].Fields["taskId"].(string)
 				require.NotEqual(t, clientTaskID, serverTaskID)
+				serverGlobalTaskID, _ := newBlocks[0].Fields["globalTaskId"].(string)
+				require.NotEmpty(t, serverGlobalTaskID)
+				require.Equal(t, serverGlobalTaskID, newBlocks[0].Fields["properties"].(map[string]interface{})[cardGlobalTaskIDProperty])
 			}
 			errCh <- cErr
 		}(i)
@@ -336,6 +344,7 @@ func TestCardTaskIDLifecycleUsesUniqueIDs(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, cards, 4+concurrentCards)
 	requireUniqueTaskIDs(t, cards)
+	requireUniqueGlobalTaskIDs(t, cards)
 
 	_, err = th.App.DuplicateBlock(boardID, cards[0].ID, userID, false)
 	require.NoError(t, err)
@@ -344,7 +353,9 @@ func TestCardTaskIDLifecycleUsesUniqueIDs(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, cards, 5+concurrentCards)
 	requireUniqueTaskIDs(t, cards)
+	requireUniqueGlobalTaskIDs(t, cards)
 	requireTaskIDExists(t, cards, "#16")
+	requireGlobalTaskIDExists(t, cards, "G-16")
 }
 
 func TestGetCards(t *testing.T) {
@@ -561,6 +572,14 @@ func cloneBlockForTest(block *model.Block) *model.Block {
 	if block.Fields != nil {
 		clone.Fields = make(map[string]interface{}, len(block.Fields))
 		for key, value := range block.Fields {
+			if props, ok := value.(map[string]interface{}); ok {
+				propsClone := make(map[string]interface{}, len(props))
+				for propKey, propValue := range props {
+					propsClone[propKey] = propValue
+				}
+				clone.Fields[key] = propsClone
+				continue
+			}
 			clone.Fields[key] = value
 		}
 	}
@@ -578,11 +597,35 @@ func requireUniqueTaskIDs(t *testing.T, cards []*model.Card) {
 	}
 }
 
+func requireUniqueGlobalTaskIDs(t *testing.T, cards []*model.Card) {
+	t.Helper()
+	seen := make(map[string]struct{}, len(cards))
+	for _, card := range cards {
+		require.NotEmpty(t, card.GlobalTaskID, card.Title)
+		_, exists := seen[card.GlobalTaskID]
+		require.False(t, exists, "duplicate global task id %s", card.GlobalTaskID)
+		seen[card.GlobalTaskID] = struct{}{}
+		require.Equal(t, card.GlobalTaskID, card.Properties[cardGlobalTaskIDProperty])
+	}
+}
+
 func requireTaskIDByTitle(t *testing.T, cards []*model.Card, title string, taskID string) {
 	t.Helper()
 	for _, card := range cards {
 		if card.Title == title {
 			require.Equal(t, taskID, card.TaskID)
+			return
+		}
+	}
+	require.Fail(t, "card title not found", title)
+}
+
+func requireGlobalTaskIDByTitle(t *testing.T, cards []*model.Card, title string, globalTaskID string) {
+	t.Helper()
+	for _, card := range cards {
+		if card.Title == title {
+			require.Equal(t, globalTaskID, card.GlobalTaskID)
+			require.Equal(t, globalTaskID, card.Properties[cardGlobalTaskIDProperty])
 			return
 		}
 	}
@@ -599,11 +642,33 @@ func requireTaskIDExists(t *testing.T, cards []*model.Card, taskID string) {
 	require.Fail(t, "task id not found", taskID)
 }
 
+func requireGlobalTaskIDExists(t *testing.T, cards []*model.Card, globalTaskID string) {
+	t.Helper()
+	for _, card := range cards {
+		if card.GlobalTaskID == globalTaskID {
+			return
+		}
+	}
+	require.Fail(t, "global task id not found", globalTaskID)
+}
+
 func requireTaskIDByBlockTitle(t *testing.T, blocks []*model.Block, title string, taskID string) {
 	t.Helper()
 	for _, block := range blocks {
 		if block.Title == title {
 			require.Equal(t, taskID, block.Fields["taskId"])
+			return
+		}
+	}
+	require.Fail(t, "block title not found", title)
+}
+
+func requireGlobalTaskIDByBlockTitle(t *testing.T, blocks []*model.Block, title string, globalTaskID string) {
+	t.Helper()
+	for _, block := range blocks {
+		if block.Title == title {
+			require.Equal(t, globalTaskID, block.Fields["globalTaskId"])
+			require.Equal(t, globalTaskID, block.Fields["properties"].(map[string]interface{})[cardGlobalTaskIDProperty])
 			return
 		}
 	}

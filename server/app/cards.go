@@ -14,7 +14,11 @@ import (
 	"github.com/mattermost/focalboard/server/utils"
 )
 
-const cardTaskIDPrefix = "#"
+const (
+	cardTaskIDPrefix         = "#"
+	cardGlobalTaskIDPrefix   = "G-"
+	cardGlobalTaskIDProperty = "__globalTaskId"
+)
 
 func (a *App) CreateCard(card *model.Card, boardID string, userID string, disableNotify bool) (*model.Card, error) {
 	// Convert the card struct to a block and insert the block.
@@ -27,18 +31,6 @@ func (a *App) CreateCard(card *model.Card, boardID string, userID string, disabl
 	card.CreateAt = now
 	card.UpdateAt = now
 	card.DeleteAt = 0
-
-	unlock := a.lockCardTaskIDs(boardID)
-	defer unlock()
-
-	if err := a.ensureCardTaskIDsLocked(boardID); err != nil {
-		return nil, fmt.Errorf("cannot backfill card task ids: %w", err)
-	}
-	taskID, err := a.nextCardTaskIDLocked(boardID)
-	if err != nil {
-		return nil, fmt.Errorf("cannot create card task id: %w", err)
-	}
-	card.TaskID = taskID
 
 	block := model.Card2Block(card)
 
@@ -55,18 +47,27 @@ func (a *App) CreateCard(card *model.Card, boardID string, userID string, disabl
 	return newCard, nil
 }
 
-func (a *App) prepareCardTaskIDForInsertLocked(boardID string, block *model.Block) error {
+func (a *App) prepareCardIDsForInsertLocked(boardID string, block *model.Block) error {
 	if err := a.ensureCardTaskIDsLocked(boardID); err != nil {
 		return fmt.Errorf("cannot backfill card task ids: %w", err)
+	}
+	if err := a.ensureCardGlobalTaskIDsLocked(); err != nil {
+		return fmt.Errorf("cannot backfill global card task ids: %w", err)
 	}
 	taskID, err := a.nextCardTaskIDLocked(boardID)
 	if err != nil {
 		return fmt.Errorf("cannot create card task id: %w", err)
 	}
+	globalTaskID, err := a.nextCardGlobalTaskIDLocked()
+	if err != nil {
+		return fmt.Errorf("cannot create global card task id: %w", err)
+	}
 	if block.Fields == nil {
 		block.Fields = make(map[string]interface{})
 	}
 	block.Fields["taskId"] = taskID
+	block.Fields["globalTaskId"] = globalTaskID
+	setCardGlobalTaskIDProperty(block, globalTaskID)
 	return nil
 }
 
@@ -78,6 +79,15 @@ func (a *App) nextCardTaskID(boardID string) (string, error) {
 }
 
 func (a *App) nextCardTaskIDLocked(boardID string) (string, error) {
+	a.cardTaskIDStateMux.Lock()
+	if maxNumber, ok := a.cardTaskIDMaxByBoard[boardID]; ok {
+		maxNumber++
+		a.cardTaskIDMaxByBoard[boardID] = maxNumber
+		a.cardTaskIDStateMux.Unlock()
+		return fmt.Sprintf("%s%d", cardTaskIDPrefix, maxNumber), nil
+	}
+	a.cardTaskIDStateMux.Unlock()
+
 	opts := model.QueryBlocksOptions{
 		BoardID:   boardID,
 		BlockType: model.TypeCard,
@@ -100,7 +110,43 @@ func (a *App) nextCardTaskIDLocked(boardID string) (string, error) {
 		}
 	}
 
-	return fmt.Sprintf("%s%d", cardTaskIDPrefix, maxNumber+1), nil
+	maxNumber++
+	a.cardTaskIDStateMux.Lock()
+	a.cardTaskIDMaxByBoard[boardID] = maxNumber
+	a.cardTaskIDStateMux.Unlock()
+	return fmt.Sprintf("%s%d", cardTaskIDPrefix, maxNumber), nil
+}
+
+func (a *App) nextCardGlobalTaskIDLocked() (string, error) {
+	if a.cardGlobalTaskIDsBackfilled {
+		a.cardGlobalTaskIDMax++
+		return fmt.Sprintf("%s%d", cardGlobalTaskIDPrefix, a.cardGlobalTaskIDMax), nil
+	}
+
+	opts := model.QueryBlocksOptions{
+		BlockType: model.TypeCard,
+	}
+
+	blocks, err := a.store.GetBlocks(opts)
+	if err != nil {
+		return "", err
+	}
+
+	maxNumber := 0
+	for _, block := range blocks {
+		if block == nil || block.Fields == nil {
+			continue
+		}
+
+		globalTaskID, _ := block.Fields["globalTaskId"].(string)
+		if number, ok := cardGlobalTaskIDNumber(globalTaskID); ok && number > maxNumber {
+			maxNumber = number
+		}
+	}
+
+	maxNumber++
+	a.cardGlobalTaskIDMax = maxNumber
+	return fmt.Sprintf("%s%d", cardGlobalTaskIDPrefix, maxNumber), nil
 }
 
 func (a *App) ensureCardTaskIDs(boardID string) error {
@@ -111,6 +157,13 @@ func (a *App) ensureCardTaskIDs(boardID string) error {
 }
 
 func (a *App) ensureCardTaskIDsLocked(boardID string) error {
+	a.cardTaskIDStateMux.Lock()
+	if a.cardTaskIDBackfilledBoards[boardID] {
+		a.cardTaskIDStateMux.Unlock()
+		return nil
+	}
+	a.cardTaskIDStateMux.Unlock()
+
 	opts := model.QueryBlocksOptions{
 		BoardID:   boardID,
 		BlockType: model.TypeCard,
@@ -177,7 +230,110 @@ func (a *App) ensureCardTaskIDsLocked(boardID string) error {
 		}
 	}
 
+	a.cardTaskIDStateMux.Lock()
+	a.cardTaskIDMaxByBoard[boardID] = maxNumber
+	a.cardTaskIDBackfilledBoards[boardID] = true
+	a.cardTaskIDStateMux.Unlock()
 	return nil
+}
+
+func (a *App) ensureCardGlobalTaskIDs() error {
+	a.cardGlobalTaskIDMux.Lock()
+	defer a.cardGlobalTaskIDMux.Unlock()
+
+	return a.ensureCardGlobalTaskIDsLocked()
+}
+
+func (a *App) ensureCardGlobalTaskIDsLocked() error {
+	if a.cardGlobalTaskIDsBackfilled {
+		return nil
+	}
+
+	opts := model.QueryBlocksOptions{
+		BlockType: model.TypeCard,
+	}
+
+	blocks, err := a.store.GetBlocks(opts)
+	if err != nil {
+		return err
+	}
+
+	cardBlocks := make([]*model.Block, 0, len(blocks))
+	for _, block := range blocks {
+		if block == nil {
+			continue
+		}
+		cardBlocks = append(cardBlocks, block)
+	}
+
+	sort.SliceStable(cardBlocks, func(i, j int) bool {
+		left := cardBlocks[i]
+		right := cardBlocks[j]
+		if left.CreateAt != right.CreateAt {
+			return left.CreateAt < right.CreateAt
+		}
+		return left.ID < right.ID
+	})
+
+	maxNumber := 0
+	usedNumbers := make(map[int]struct{})
+	missingBlocks := make([]*model.Block, 0)
+	for _, block := range cardBlocks {
+		globalTaskID, _ := block.Fields["globalTaskId"].(string)
+		if number, ok := cardGlobalTaskIDNumber(globalTaskID); ok {
+			if number > maxNumber {
+				maxNumber = number
+			}
+			if _, exists := usedNumbers[number]; !exists {
+				usedNumbers[number] = struct{}{}
+				if setCardGlobalTaskIDProperty(block, globalTaskID) {
+					if err := a.patchCardGlobalTaskID(block, globalTaskID); err != nil {
+						return err
+					}
+				}
+				continue
+			}
+
+			block.Fields["globalTaskId"] = ""
+			missingBlocks = append(missingBlocks, block)
+			continue
+		}
+
+		missingBlocks = append(missingBlocks, block)
+	}
+
+	for _, block := range missingBlocks {
+		maxNumber++
+		globalTaskID := fmt.Sprintf("%s%d", cardGlobalTaskIDPrefix, maxNumber)
+		if block.Fields == nil {
+			block.Fields = make(map[string]interface{})
+		}
+		block.Fields["globalTaskId"] = globalTaskID
+		setCardGlobalTaskIDProperty(block, globalTaskID)
+		if err := a.patchCardGlobalTaskID(block, globalTaskID); err != nil {
+			return err
+		}
+	}
+
+	a.cardGlobalTaskIDMax = maxNumber
+	a.cardGlobalTaskIDsBackfilled = true
+	return nil
+}
+
+func (a *App) patchCardGlobalTaskID(block *model.Block, globalTaskID string) error {
+	props, _ := block.Fields["properties"].(map[string]interface{})
+	if props == nil {
+		props = make(map[string]interface{})
+	}
+	props[cardGlobalTaskIDProperty] = globalTaskID
+
+	blockPatch := &model.BlockPatch{
+		UpdatedFields: map[string]interface{}{
+			"globalTaskId": globalTaskID,
+			"properties":   props,
+		},
+	}
+	return a.store.PatchBlock(block.ID, blockPatch, model.SystemUserID)
 }
 
 func (a *App) lockCardTaskIDs(boardID string) func() {
@@ -206,8 +362,37 @@ func cardTaskIDNumber(taskID string) (int, bool) {
 	return number, true
 }
 
+func cardGlobalTaskIDNumber(globalTaskID string) (int, bool) {
+	trimmed := strings.TrimSpace(globalTaskID)
+	trimmed = strings.TrimPrefix(trimmed, cardGlobalTaskIDPrefix)
+	number, err := strconv.Atoi(trimmed)
+	if err != nil || number <= 0 {
+		return 0, false
+	}
+	return number, true
+}
+
+func setCardGlobalTaskIDProperty(block *model.Block, globalTaskID string) bool {
+	if block.Fields == nil {
+		block.Fields = make(map[string]interface{})
+	}
+	props, _ := block.Fields["properties"].(map[string]interface{})
+	if props == nil {
+		props = make(map[string]interface{})
+		block.Fields["properties"] = props
+	}
+	if props[cardGlobalTaskIDProperty] == globalTaskID {
+		return false
+	}
+	props[cardGlobalTaskIDProperty] = globalTaskID
+	return true
+}
+
 func (a *App) GetCardsForBoard(boardID string, page int, perPage int) ([]*model.Card, error) {
 	if err := a.ensureCardTaskIDs(boardID); err != nil {
+		return nil, err
+	}
+	if err := a.ensureCardGlobalTaskIDs(); err != nil {
 		return nil, err
 	}
 

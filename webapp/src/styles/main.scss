@@ -151,6 +151,13 @@ html {
         margin-right: 6px;
     }
 
+    .octo-readonly-global-taskid {
+        color: rgba(var(--center-channel-color-rgb), 0.72);
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 28px;
+    }
+
     /*-- Property list --*/
 
     .octo-propertyvalue {

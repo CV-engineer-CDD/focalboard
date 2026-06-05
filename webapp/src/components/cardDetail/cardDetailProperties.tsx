@@ -130,6 +130,22 @@ const CardDetailProperties = (props: Props) => {
 
     return (
         <div className='octo-propertylist CardDetailProperties'>
+            {card.fields.globalTaskId &&
+                <div className='octo-propertyrow'>
+                    <div className='octo-propertyname octo-propertyname--readonly'>
+                        <FormattedMessage
+                            id='CardDetail.global-id'
+                            defaultMessage='Global ID'
+                        />
+                    </div>
+                    <div
+                        className='octo-propertyvalue octo-readonly-global-taskid'
+                        title={card.fields.globalTaskId}
+                    >
+                        {card.fields.globalTaskId}
+                    </div>
+                </div>
+            }
             {board.cardProperties.map((propertyTemplate: IPropertyTemplate) => {
                 return (
                     <div

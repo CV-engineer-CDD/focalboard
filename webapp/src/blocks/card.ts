@@ -7,6 +7,7 @@ type CardFields = {
     icon?: string
     isTemplate?: boolean
     taskId: string
+    globalTaskId: string
     properties: Record<string, string | string[]>
     contentOrder: Array<string | string[]>
 }
@@ -35,6 +36,7 @@ function createCard(block?: Block): Card {
         fields: {
             icon: block?.fields.icon || '',
             taskId: block?.fields.taskId || newBlock.id,
+            globalTaskId: block?.fields.globalTaskId || '',
             properties: {...(block?.fields.properties || {})},
             contentOrder,
             isTemplate: block?.fields.isTemplate || false,

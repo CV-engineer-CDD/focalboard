@@ -60,6 +60,7 @@ const limitCard = (isBoardTemplate: boolean, limitTimestamp: number, card: Card)
         fields: {
             icon: card.fields.icon,
             taskId: card.fields.taskId || card.id,
+            globalTaskId: card.fields.globalTaskId || '',
             properties: {},
             contentOrder: [],
         },
