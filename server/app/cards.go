@@ -55,6 +55,21 @@ func (a *App) CreateCard(card *model.Card, boardID string, userID string, disabl
 	return newCard, nil
 }
 
+func (a *App) prepareCardTaskIDForInsertLocked(boardID string, block *model.Block) error {
+	if err := a.ensureCardTaskIDsLocked(boardID); err != nil {
+		return fmt.Errorf("cannot backfill card task ids: %w", err)
+	}
+	taskID, err := a.nextCardTaskIDLocked(boardID)
+	if err != nil {
+		return fmt.Errorf("cannot create card task id: %w", err)
+	}
+	if block.Fields == nil {
+		block.Fields = make(map[string]interface{})
+	}
+	block.Fields["taskId"] = taskID
+	return nil
+}
+
 func (a *App) nextCardTaskID(boardID string) (string, error) {
 	unlock := a.lockCardTaskIDs(boardID)
 	defer unlock()

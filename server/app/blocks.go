@@ -203,7 +203,19 @@ func (a *App) InsertBlockAndNotify(block *model.Block, modifiedByID string, disa
 		return bErr
 	}
 
+	var unlock func()
+	if block.Type == model.TypeCard {
+		unlock = a.lockCardTaskIDs(block.BoardID)
+		if err := a.prepareCardTaskIDForInsertLocked(block.BoardID, block); err != nil {
+			unlock()
+			return err
+		}
+	}
+
 	err := a.store.InsertBlock(block, modifiedByID)
+	if unlock != nil {
+		unlock()
+	}
 	if err == nil {
 		a.blockChangeNotifier.Enqueue(func() error {
 			a.wsAdapter.BroadcastBlockChange(board.TeamID, block)
@@ -279,6 +291,24 @@ func (a *App) InsertBlocksAndNotify(blocks []*model.Block, modifiedByID string, 
 		return nil, err
 	}
 
+	hasCards := false
+	for _, block := range blocks {
+		if block.Type == model.TypeCard {
+			hasCards = true
+			break
+		}
+	}
+
+	var unlock func()
+	if hasCards {
+		unlock = a.lockCardTaskIDs(boardID)
+		defer unlock()
+
+		if err := a.ensureCardTaskIDsLocked(boardID); err != nil {
+			return nil, err
+		}
+	}
+
 	needsNotify := make([]*model.Block, 0, len(blocks))
 	for i := range blocks {
 		// this check is needed to whitelist inbuilt template
@@ -293,6 +323,17 @@ func (a *App) InsertBlocksAndNotify(blocks []*model.Block, modifiedByID string, 
 				a.logger.Info("views limit reached on board", mlog.String("board_id", blocks[i].ParentID), mlog.String("team_id", board.TeamID))
 				return nil, model.ErrViewsLimitReached
 			}
+		}
+
+		if blocks[i].Type == model.TypeCard {
+			taskID, tErr := a.nextCardTaskIDLocked(boardID)
+			if tErr != nil {
+				return nil, fmt.Errorf("cannot insert card task id: %w", tErr)
+			}
+			if blocks[i].Fields == nil {
+				blocks[i].Fields = make(map[string]interface{})
+			}
+			blocks[i].Fields["taskId"] = taskID
 		}
 
 		err := a.store.InsertBlock(blocks[i], modifiedByID)

@@ -293,11 +293,24 @@ func TestCardTaskIDLifecycleUsesUniqueIDs(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, cErr := th.App.CreateCard(&model.Card{
-				Title:        fmt.Sprintf("new card %d", i),
-				ContentOrder: []string{},
-				Properties:   map[string]any{},
-			}, boardID, userID, false)
+			clientTaskID := utils.NewID(utils.IDTypeCard)
+			newBlocks, cErr := th.App.InsertBlocks([]*model.Block{
+				{
+					ID:      utils.NewID(utils.IDTypeCard),
+					BoardID: boardID,
+					Type:    model.TypeCard,
+					Title:   fmt.Sprintf("new card %d", i),
+					Fields: map[string]interface{}{
+						"taskId":       clientTaskID,
+						"contentOrder": []string{},
+						"properties":   map[string]any{},
+					},
+				},
+			}, userID)
+			if cErr == nil {
+				serverTaskID, _ := newBlocks[0].Fields["taskId"].(string)
+				require.NotEqual(t, clientTaskID, serverTaskID)
+			}
 			errCh <- cErr
 		}(i)
 	}
