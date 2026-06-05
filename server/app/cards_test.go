@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"reflect"
+	"sync"
 	"testing"
 
 	"github.com/golang/mock/gomock"
@@ -175,6 +176,150 @@ func TestEnsureCardTaskIDs(t *testing.T) {
 	require.Equal(t, "#7", duplicate.Fields["taskId"])
 	require.Equal(t, "#8", missingFields.Fields["taskId"])
 	require.Equal(t, "#4", existing.Fields["taskId"])
+}
+
+func TestCardTaskIDLifecycleUsesUniqueIDs(t *testing.T) {
+	th, tearDown := SetupTestHelper(t)
+	defer tearDown()
+
+	boardID := utils.NewID(utils.IDTypeBoard)
+	userID := utils.NewID(utils.IDTypeUser)
+	board := &model.Board{ID: boardID}
+
+	var blocksMux sync.Mutex
+	blocks := []*model.Block{
+		{
+			ID:       utils.NewID(utils.IDTypeCard),
+			BoardID:  boardID,
+			Type:     model.TypeCard,
+			Title:    "old missing task id",
+			CreateAt: 10,
+			Fields:   map[string]interface{}{},
+		},
+		{
+			ID:       utils.NewID(utils.IDTypeCard),
+			BoardID:  boardID,
+			Type:     model.TypeCard,
+			Title:    "old existing task id",
+			CreateAt: 20,
+			Fields:   map[string]interface{}{"taskId": "#2"},
+		},
+		{
+			ID:       utils.NewID(utils.IDTypeCard),
+			BoardID:  boardID,
+			Type:     model.TypeCard,
+			Title:    "old duplicate task id",
+			CreateAt: 30,
+			Fields:   map[string]interface{}{"taskId": "#2"},
+		},
+		{
+			ID:       utils.NewID(utils.IDTypeCard),
+			BoardID:  boardID,
+			Type:     model.TypeCard,
+			Title:    "old internal id task id",
+			CreateAt: 40,
+			Fields:   map[string]interface{}{"taskId": utils.NewID(utils.IDTypeCard)},
+		},
+	}
+
+	cardBlocks := func() []*model.Block {
+		out := make([]*model.Block, 0, len(blocks))
+		for _, block := range blocks {
+			if block.BoardID == boardID && block.Type == model.TypeCard {
+				out = append(out, cloneBlockForTest(block))
+			}
+		}
+		return out
+	}
+
+	th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
+		BoardID:   boardID,
+		BlockType: model.TypeCard,
+	}).DoAndReturn(func(model.QueryBlocksOptions) ([]*model.Block, error) {
+		blocksMux.Lock()
+		defer blocksMux.Unlock()
+		return cardBlocks(), nil
+	}).AnyTimes()
+	th.Store.EXPECT().PatchBlock(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(blockID string, blockPatch *model.BlockPatch, userID string) error {
+			blocksMux.Lock()
+			defer blocksMux.Unlock()
+			for _, block := range blocks {
+				if block.ID == blockID {
+					blockPatch.Patch(block)
+					return nil
+				}
+			}
+			return model.NewErrNotFound(blockID)
+		},
+	).AnyTimes()
+	th.Store.EXPECT().GetBoard(boardID).Return(board, nil).AnyTimes()
+	th.Store.EXPECT().InsertBlock(gomock.Any(), userID).DoAndReturn(func(block *model.Block, _ string) error {
+		blocksMux.Lock()
+		defer blocksMux.Unlock()
+		blocks = append(blocks, cloneBlockForTest(block))
+		return nil
+	}).AnyTimes()
+	th.Store.EXPECT().DuplicateBlock(boardID, gomock.Any(), userID, false).DoAndReturn(
+		func(_ string, blockID string, _ string, _ bool) ([]*model.Block, error) {
+			blocksMux.Lock()
+			defer blocksMux.Unlock()
+			for _, block := range blocks {
+				if block.ID == blockID {
+					duplicate := cloneBlockForTest(block)
+					duplicate.ID = utils.NewID(utils.IDTypeCard)
+					blocks = append(blocks, duplicate)
+					return []*model.Block{cloneBlockForTest(duplicate)}, nil
+				}
+			}
+			return nil, model.NewErrNotFound(blockID)
+		},
+	)
+	th.Store.EXPECT().GetMembersForBoard(boardID).Return([]*model.BoardMember{}, nil).AnyTimes()
+
+	cards, err := th.App.GetCardsForBoard(boardID, 0, 0)
+	require.NoError(t, err)
+	require.Len(t, cards, 4)
+	requireUniqueTaskIDs(t, cards)
+	requireTaskIDByTitle(t, cards, "old missing task id", "#3")
+	requireTaskIDByTitle(t, cards, "old existing task id", "#2")
+	requireTaskIDByTitle(t, cards, "old duplicate task id", "#4")
+	requireTaskIDByTitle(t, cards, "old internal id task id", "#5")
+
+	const concurrentCards = 10
+	var wg sync.WaitGroup
+	errCh := make(chan error, concurrentCards)
+	for i := 0; i < concurrentCards; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, cErr := th.App.CreateCard(&model.Card{
+				Title:        fmt.Sprintf("new card %d", i),
+				ContentOrder: []string{},
+				Properties:   map[string]any{},
+			}, boardID, userID, false)
+			errCh <- cErr
+		}(i)
+	}
+	wg.Wait()
+	close(errCh)
+	for cErr := range errCh {
+		require.NoError(t, cErr)
+	}
+
+	cards, err = th.App.GetCardsForBoard(boardID, 0, 0)
+	require.NoError(t, err)
+	require.Len(t, cards, 4+concurrentCards)
+	requireUniqueTaskIDs(t, cards)
+
+	_, err = th.App.DuplicateBlock(boardID, cards[0].ID, userID, false)
+	require.NoError(t, err)
+
+	cards, err = th.App.GetCardsForBoard(boardID, 0, 0)
+	require.NoError(t, err)
+	require.Len(t, cards, 5+concurrentCards)
+	requireUniqueTaskIDs(t, cards)
+	requireTaskIDExists(t, cards, "#16")
 }
 
 func TestGetCards(t *testing.T) {
@@ -384,4 +529,47 @@ func modifyProps(m map[string]any) map[string]any {
 		out[k] = utils.NewID(utils.IDTypeBlock)
 	}
 	return out
+}
+
+func cloneBlockForTest(block *model.Block) *model.Block {
+	clone := *block
+	if block.Fields != nil {
+		clone.Fields = make(map[string]interface{}, len(block.Fields))
+		for key, value := range block.Fields {
+			clone.Fields[key] = value
+		}
+	}
+	return &clone
+}
+
+func requireUniqueTaskIDs(t *testing.T, cards []*model.Card) {
+	t.Helper()
+	seen := make(map[string]struct{}, len(cards))
+	for _, card := range cards {
+		require.NotEmpty(t, card.TaskID, card.Title)
+		_, exists := seen[card.TaskID]
+		require.False(t, exists, "duplicate task id %s", card.TaskID)
+		seen[card.TaskID] = struct{}{}
+	}
+}
+
+func requireTaskIDByTitle(t *testing.T, cards []*model.Card, title string, taskID string) {
+	t.Helper()
+	for _, card := range cards {
+		if card.Title == title {
+			require.Equal(t, taskID, card.TaskID)
+			return
+		}
+	}
+	require.Fail(t, "card title not found", title)
+}
+
+func requireTaskIDExists(t *testing.T, cards []*model.Card, taskID string) {
+	t.Helper()
+	for _, card := range cards {
+		if card.TaskID == taskID {
+			return
+		}
+	}
+	require.Fail(t, "task id not found", taskID)
 }
