@@ -486,6 +486,10 @@ func (a *App) GetBlockCountsByType() (map[string]int64, error) {
 }
 
 func (a *App) GetBlocksForBoard(boardID string) ([]*model.Block, error) {
+	if err := a.ensureCardTaskIDs(boardID); err != nil {
+		return nil, err
+	}
+
 	return a.store.GetBlocksForBoard(boardID)
 }
 

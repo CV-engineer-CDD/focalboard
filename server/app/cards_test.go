@@ -240,6 +240,11 @@ func TestCardTaskIDLifecycleUsesUniqueIDs(t *testing.T) {
 		defer blocksMux.Unlock()
 		return cardBlocks(), nil
 	}).AnyTimes()
+	th.Store.EXPECT().GetBlocksForBoard(boardID).DoAndReturn(func(string) ([]*model.Block, error) {
+		blocksMux.Lock()
+		defer blocksMux.Unlock()
+		return cardBlocks(), nil
+	})
 	th.Store.EXPECT().PatchBlock(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 		func(blockID string, blockPatch *model.BlockPatch, userID string) error {
 			blocksMux.Lock()
@@ -285,6 +290,13 @@ func TestCardTaskIDLifecycleUsesUniqueIDs(t *testing.T) {
 	requireTaskIDByTitle(t, cards, "old existing task id", "#2")
 	requireTaskIDByTitle(t, cards, "old duplicate task id", "#4")
 	requireTaskIDByTitle(t, cards, "old internal id task id", "#5")
+
+	allBlocks, err := th.App.GetBlocksForBoard(boardID)
+	require.NoError(t, err)
+	requireTaskIDByBlockTitle(t, allBlocks, "old missing task id", "#3")
+	requireTaskIDByBlockTitle(t, allBlocks, "old existing task id", "#2")
+	requireTaskIDByBlockTitle(t, allBlocks, "old duplicate task id", "#4")
+	requireTaskIDByBlockTitle(t, allBlocks, "old internal id task id", "#5")
 
 	const concurrentCards = 10
 	var wg sync.WaitGroup
@@ -585,4 +597,15 @@ func requireTaskIDExists(t *testing.T, cards []*model.Card, taskID string) {
 		}
 	}
 	require.Fail(t, "task id not found", taskID)
+}
+
+func requireTaskIDByBlockTitle(t *testing.T, blocks []*model.Block, title string, taskID string) {
+	t.Helper()
+	for _, block := range blocks {
+		if block.Title == title {
+			require.Equal(t, taskID, block.Fields["taskId"])
+			return
+		}
+	}
+	require.Fail(t, "block title not found", title)
 }
