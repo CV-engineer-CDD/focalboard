@@ -153,6 +153,57 @@ property template，避免污染用户自定义列配置。
 - 全局编号使用全局锁。
 - 缓存 map 增加独立锁，避免不同 board 并发写缓存导致 Go map race。
 
+### 第六阶段：已删除卡片 UI 恢复
+
+在 `7.11.3` 中，为了满足“删除最高编号后下一张新卡接替该编号”的需求，服务端把
+软删除卡片排除在编号占用范围之外，并补了恢复冲突时自动重分配 ID 的逻辑。
+随后产生了新的使用问题：既然后端支持恢复，那么 UI 中也需要一个可见入口，否则用户
+不知道如何恢复已删除卡片。
+
+需求：
+
+- 能在 board UI 中看到当前 board 已删除卡片。
+- 能从 UI 直接恢复卡片，不需要手写 API 或操作数据库。
+- 恢复后仍遵守 `7.11.3` 的编号规则：如果原 `#N` / `G-N` 已被新卡复用，恢复卡片
+  自动获得新的不冲突编号。
+- 已删除卡片不能重新混入正常看板、表格、画廊、日历视图。
+
+实现：
+
+- 复用后端已有接口 `POST /boards/{boardID}/blocks/{blockID}/undelete`。
+- 复用前端已有 `octoClient.undeleteBlock`，在 `mutator` 中新增显式
+  `undeleteBlock` 方法，把恢复后的 block 写回 Redux。
+- Redux `cards` store 新增 `deletedCards`，专门保存软删除卡片。
+- `updateCards` / `loadBoardData` / `initialReadOnlyLoad` 遇到 `deleteAt != 0`
+  的 card 时写入 `deletedCards`，并从正常 `cards` / `templates` 中移除。
+- 正常 selector 仍只返回未删除卡片，避免影响 board 原功能。
+- board 顶部三点菜单增加 `Deleted cards ({count})`。
+- 新增 `DeletedCardsDialog`，显示 `#N`、`G-N`、标题、删除时间和 `Restore` 按钮。
+- 恢复失败时显示错误 flash message，成功时显示正常提示。
+
+验证与构建过程：
+
+- `webapp npm run check` 通过。
+- 主 webapp `npm run pack` 通过，只出现原有 bundle size warning。
+- 插件 webapp `npm run build` 通过，只出现原有 bundle size warning。
+- 插件 webapp `npm run lint` 通过。
+- `mattermost-plugin/webapp npm run check-types` 在当前仓库/loong64 环境失败，
+  错误来自既有 Mattermost webapp 类型定义和 React 类型重复，不指向本次新增文件。
+- Jest 在当前 loong64 环境失败，原因是 `@swc/core` 没有 Linux loong64 native
+  binding；因此无法在本机直接跑 `viewHeaderActionsMenu.test.tsx`，已手动同步
+  snapshot 中新增的 `Deleted cards (1)` 菜单项。
+
+构建问题与处理：
+
+- 运行 `mattermost-plugin/webapp npm run check-types` 后，`tsc` 会在
+  `mattermost-plugin/webapp/dist` 中生成大量 `.js` / `.map` 和测试编译产物。
+- 如果不清理直接 `make bundle`，这些临时产物会被打进插件包。
+- 处理方式是清理 `webapp/pack`、`webapp/dist`、`mattermost-plugin/webapp/dist`、
+  `mattermost-plugin/dist`，然后按正确顺序重新执行：
+  `webapp npm run pack`、`mattermost-plugin/webapp npm run build`、`make bundle`。
+- 最终校验确认 `focalboard-7.11.4.tar.gz` 中没有 `webapp/dist/webapp`、
+  `webapp/dist/mattermost-plugin` 或 `*.test.js` 编译产物。
+
 ## 主要源码修改
 
 服务端模型：
@@ -194,9 +245,22 @@ property template，避免污染用户自定义列配置。
 
 - `webapp/src/store/cards.ts`
   - limited card 状态保留 `globalTaskId`
+  - 增加 `deletedCards`，保存已删除卡片供恢复弹窗使用
 
 - `webapp/src/styles/main.scss`
   - `Global ID` 只读显示样式
+
+- `webapp/src/mutator.ts`
+  - 增加 `undeleteBlock`，调用恢复 API 并更新前端状态
+
+- `webapp/src/components/viewHeader/viewHeaderActionsMenu.tsx`
+  - board 顶部三点菜单增加 `Deleted cards ({count})`
+
+- `webapp/src/components/viewHeader/deletedCardsDialog.tsx`
+  - 已删除卡片列表与恢复按钮
+
+- `webapp/src/components/viewHeader/deletedCardsDialog.scss`
+  - 已删除卡片弹窗样式
 
 插件/loong64：
 
