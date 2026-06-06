@@ -19,6 +19,9 @@ const (
 	cardGlobalTaskIDPrefix     = "G-"
 	cardGlobalTaskIDProperty   = "__globalTaskId"
 	cardGlobalTaskIDCounterKey = "focalboard_card_global_task_id_max"
+	// Previous builds used a millisecond timestamp as the first global counter.
+	// Treat those values as invalid user-facing IDs and compact them back to G-N.
+	cardGlobalTaskIDTimestampFloor = 1000000000000
 )
 
 func (a *App) CreateCard(card *model.Card, boardID string, userID string, disableNotify bool) (*model.Card, error) {
@@ -132,7 +135,18 @@ func (a *App) nextCardGlobalTaskIDLocked() (string, error) {
 			}
 			a.cardGlobalTaskIDMax = counter
 		} else {
-			a.cardGlobalTaskIDMax = int(utils.GetMillis())
+			counter, cErr := a.loadCardGlobalTaskIDMaxLocked()
+			if cErr != nil {
+				return "", cErr
+			}
+			a.cardGlobalTaskIDMax = counter
+		}
+		if isTimestampCardGlobalTaskIDNumber(a.cardGlobalTaskIDMax) {
+			counter, cErr := a.loadCardGlobalTaskIDMaxLocked()
+			if cErr != nil {
+				return "", cErr
+			}
+			a.cardGlobalTaskIDMax = counter
 		}
 		a.cardGlobalTaskIDCounterLoaded = true
 	}
@@ -142,6 +156,34 @@ func (a *App) nextCardGlobalTaskIDLocked() (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("%s%d", cardGlobalTaskIDPrefix, a.cardGlobalTaskIDMax), nil
+}
+
+func (a *App) loadCardGlobalTaskIDMaxLocked() (int, error) {
+	opts := model.QueryBlocksOptions{
+		BlockType: model.TypeCard,
+	}
+
+	blocks, err := a.store.GetBlocks(opts)
+	if err != nil {
+		return 0, err
+	}
+
+	maxNumber := 0
+	for _, block := range blocks {
+		if block == nil || block.Fields == nil {
+			continue
+		}
+
+		globalTaskID, _ := block.Fields["globalTaskId"].(string)
+		if number, ok := cardGlobalTaskIDNumber(globalTaskID); ok && number > maxNumber {
+			maxNumber = number
+		}
+	}
+
+	if err := a.store.SetSystemSetting(cardGlobalTaskIDCounterKey, strconv.Itoa(maxNumber)); err != nil {
+		return 0, err
+	}
+	return maxNumber, nil
 }
 
 func (a *App) ensureCardTaskIDs(boardID string) error {
@@ -378,10 +420,14 @@ func cardGlobalTaskIDNumber(globalTaskID string) (int, bool) {
 	trimmed := strings.TrimSpace(globalTaskID)
 	trimmed = strings.TrimPrefix(trimmed, cardGlobalTaskIDPrefix)
 	number, err := strconv.Atoi(trimmed)
-	if err != nil || number <= 0 {
+	if err != nil || number <= 0 || isTimestampCardGlobalTaskIDNumber(number) {
 		return 0, false
 	}
 	return number, true
+}
+
+func isTimestampCardGlobalTaskIDNumber(number int) bool {
+	return number >= cardGlobalTaskIDTimestampFloor
 }
 
 func setCardGlobalTaskIDProperty(block *model.Block, globalTaskID string) bool {

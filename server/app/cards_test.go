@@ -110,6 +110,53 @@ func TestCardTaskIDNumber(t *testing.T) {
 	})
 }
 
+func TestCardGlobalTaskIDNumber(t *testing.T) {
+	t.Run("accepts global number", func(t *testing.T) {
+		number, ok := cardGlobalTaskIDNumber("G-42")
+		require.True(t, ok)
+		require.Equal(t, 42, number)
+	})
+
+	t.Run("rejects timestamp based number", func(t *testing.T) {
+		_, ok := cardGlobalTaskIDNumber("G-1780519393936")
+		require.False(t, ok)
+	})
+}
+
+func TestNextCardGlobalTaskIDResetsTimestampCounter(t *testing.T) {
+	th, tearDown := SetupTestHelper(t)
+	defer tearDown()
+
+	blocks := []*model.Block{
+		{
+			ID:   utils.NewID(utils.IDTypeCard),
+			Type: model.TypeCard,
+			Fields: map[string]interface{}{
+				"globalTaskId": "G-2",
+			},
+		},
+		{
+			ID:   utils.NewID(utils.IDTypeCard),
+			Type: model.TypeCard,
+			Fields: map[string]interface{}{
+				"globalTaskId": "G-1780519393936",
+			},
+		},
+	}
+
+	th.Store.EXPECT().GetSystemSetting(cardGlobalTaskIDCounterKey).Return("1780519393936", nil)
+	th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
+		BlockType: model.TypeCard,
+	}).Return(blocks, nil)
+	th.Store.EXPECT().SetSystemSetting(cardGlobalTaskIDCounterKey, "2").Return(nil)
+	th.Store.EXPECT().SetSystemSetting(cardGlobalTaskIDCounterKey, "3").Return(nil)
+
+	globalTaskID, err := th.App.nextCardGlobalTaskIDLocked()
+
+	require.NoError(t, err)
+	require.Equal(t, "G-3", globalTaskID)
+}
+
 func TestEnsureCardTaskIDs(t *testing.T) {
 	th, tearDown := SetupTestHelper(t)
 	defer tearDown()

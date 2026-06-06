@@ -96,6 +96,9 @@ property template，避免污染用户自定义列配置。
 - 每个 board 的旧 `taskId` 迁移只在当前进程内执行一次。
 - 全局 `globalTaskId` 不再通过扫描所有 board 恢复最大值。
 - 全局编号改用 `system_settings` 中的持久计数器 `focalboard_card_global_task_id_max`。
+- 如果计数器不存在，首次发号时扫描一次已有卡片，按最高的正常 `G-N` 初始化。
+- 上一版错误生成的毫秒时间戳形态 ID，例如 `G-1780519393936`，视为无效旧值，
+  在对应 board 迁移时重新分配为正常序列号。
 - 旧 `globalTaskId` 只在当前打开或写入的 board 内懒迁移，并在进程内按 board 缓存。
 - 打开整板时复用已经取回的 board blocks 做迁移，避免打开前额外查询一次当前 board 卡片。
 - 新建/复制卡片直接从持久计数器递增，不再重复全量扫描。
@@ -288,13 +291,14 @@ file mattermost-plugin/server/dist/plugin-linux-loong64
 - 如果同一个数据库有多个插件进程同时写入，严格跨进程唯一需要数据库事务序列或唯一约束。
 - 当前 ID 存在 block fields JSON 中，不是独立索引列。
 - 全局编号计数器持久化在 `system_settings`；插件重启后不会为了恢复最大值扫描全库。
-- 如果系统设置里没有旧计数器，新计数器从当前毫秒时间戳起步，避免和早期小编号冲突。
+- 如果系统设置里没有旧计数器，首次发号会扫描一次已有卡片并按最高正常 `G-N`
+  初始化；不会再从当前毫秒时间戳起步。
 
 ## 产物
 
 最终插件包生成在工作区根目录：
 
 ```text
-focalboard-7.11.1-taskid-linux-loong64.tar.gz
-focalboard-7.11.1-taskid-linux-loong64.tar.gz.zst
+focalboard-7.11.2-taskid-linux-loong64.tar.gz
+focalboard-7.11.2-taskid-linux-loong64.tar.gz.zst
 ```
