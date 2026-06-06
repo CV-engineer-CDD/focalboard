@@ -71,6 +71,19 @@ Mattermost Boards 插件包期间的需求演进、实现调整、问题修复�
 - 验证：`webapp npm run check` 通过；`go test ./app -run '^(TestDeleteBlock|TestUndeleteBlock|TestPermanentlyDeleteBlock)$' -count=1` 通过；`go test ./api -run TestNonExistent -count=1` 通过。
 - 已知：`go test ./services/store/sqlstore` 在当前 loong64 环境仍受 `modernc.org/libc` build constraints 限制，无法作为本地验证项。
 
+### `7.11.6-taskid-linux-loong64`
+
+- 需求修正：用户反馈 `7.11.3` 的“删除最高号后复用编号”虽然能填补空洞，但会破坏代码、提交记录和 Boards 卡片之间的长期引用稳定性。
+- 设计结论：软删除和永久删除都不再释放 `taskId` / `globalTaskId`；永久删除只删除卡片与恢复历史，不把编号放回可用池。
+- 功能调整：卡片外侧显示跨 board 全局 ID，`G-30392` 展示为 `#30392`。
+- 功能调整：卡片详情属性区把 `Global ID` 改为 `Board ID`，显示 board 内编号数字，例如 `471`。
+- 修复：`Deleted cards` 弹窗不再被 websocket 删除占位块覆盖完整卡片信息，避免只显示内部字符串和 `Untitled`。
+- 修复：`Deleted cards` 从后端读取最新 deleted card history，删除时间使用真实历史 `deleteAt`。
+- 修复：恢复、删除、新建等 mutator 路径检查 HTTP 状态，避免失败响应被前端当作成功处理造成“点一次没反应”。
+- 实现：新增 board 级持久计数器 `focalboard_card_task_id_max_{boardID}`，保证永久删除历史后重启也不会复用 board 内编号。
+- 实现：全局计数器初始化时会取 active cards 与 deleted card history 的最大值，修复从 `7.11.3` 升级后 deleted 最高号被遗忘的问题。
+- 验证：`webapp npm run check` 通过；`go test ./app -run '^(TestDeleteBlock|TestUndeleteBlock|TestPermanentlyDeleteBlock|TestCardTaskIDLifecycleUsesUniqueIDs|TestCreateCard|TestEnsureCardTaskIDs|TestNextCardGlobalTaskIDResetsTimestampCounter)$' -count=1` 通过；`go test ./api -run TestNonExistent -count=1` 通过。
+
 ## 需求演进
 
 ### 第一阶段：board 内唯一 ID
@@ -268,6 +281,54 @@ go test ./api -run TestNonExistent -count=1
 - `sqlstore` 包在 loong64 上仍因 `modernc.org/libc` 对 loong64 缺少对应 build
   constraints 文件而无法本地运行，这属于此前已存在的 loong64 测试环境限制。
 
+### 第八阶段：编号不复用、显示语义对换与 Deleted cards 修复
+
+`7.11.5` 后继续测试时，出现了几类使用问题：
+
+- `Deleted cards` 中有时恢复卡片第一次失败，第二次才成功。
+- `Deleted cards` 中部分卡片只显示内部字符串和 `Untitled`，看不到真实标题和可读 ID。
+- `Deleted cards` 中删除时间异常，多个卡片显示成同一个时间。
+- 新建卡片、删除卡片偶发点击后无响应，需要再点一次。
+- 外部卡片卡面显示的是 board 内编号，但用户更希望外部显示全局编号，详情属性显示 board 内编号。
+- 对永久删除后是否释放编号存在疑问：如果释放，能填补空洞；如果不释放，能保证代码引用长期唯一。
+
+最终取舍：
+
+- 以“代码和 Boards 记录长期稳定关联”为最高优先级。
+- `globalTaskId` 不能复用，否则旧 commit、构建日志或代码注释中的编号可能指向新任务。
+- `taskId` 也不复用，保持规则一致，避免恢复、永久删除、重启后出现编号漂移。
+- 因此删除 `#28447` 后，即使最大编号是 `#36666`，新卡仍从 `#36667` 继续；中间空洞是有意保留。
+- 永久删除的含义是“卡片和恢复历史不可再恢复”，不是“编号进入可复用池”。
+
+本次修改：
+
+- 普通 soft delete 不再回退 board/global 计数器。
+- `GetBlocksForBoard` 额外返回当前 board 最新 deleted card history，使 Deleted cards 弹窗拿到真实标题、字段和删除时间。
+- 前端 `deletedCards` reducer 合并已有完整卡片数据与 websocket 删除事件，只用删除事件更新 `deleteAt`，避免占位块覆盖标题和字段。
+- 新增 `displayCardGlobalID` / `displayCardBoardID` 前端 helper。
+- 看板、表格、画廊、日历、卡片详情标题统一外显全局 ID。
+- 卡片详情属性区从 `Global ID` 改为 `Board ID`。
+- mutator 对新建、删除、恢复、永久删除的 HTTP response 做状态检查。
+- board 内最大编号持久化到 `system_settings`，key 为 `focalboard_card_task_id_max_{boardID}`。
+- 永久删除前会把被删卡片编号写入 board/global 最大计数器，确保历史删除后也不会复用。
+
+验证情况：
+
+```bash
+cd webapp
+npm run check
+
+cd ../server
+go test ./app -run '^(TestDeleteBlock|TestUndeleteBlock|TestPermanentlyDeleteBlock|TestCardTaskIDLifecycleUsesUniqueIDs|TestCreateCard|TestEnsureCardTaskIDs|TestNextCardGlobalTaskIDResetsTimestampCounter)$' -count=1
+go test ./api -run TestNonExistent -count=1
+```
+
+结果：
+
+- 前端 lint/stylelint 通过。
+- App 层 ID 生命周期、删除、恢复、永久删除测试通过。
+- API 包编译通过。
+
 ## 主要源码修改
 
 服务端模型：
@@ -311,6 +372,10 @@ go test ./api -run TestNonExistent -count=1
   - limited card 状态保留 `globalTaskId`
   - 增加 `deletedCards`，保存已删除卡片供恢复弹窗使用
   - 增加 `removeDeletedCard`，永久删除成功后从恢复列表移除
+  - 删除事件与已有完整卡片合并，避免 websocket 删除占位块覆盖标题和 ID 字段
+
+- `webapp/src/cardIDs.ts`
+  - 统一外显全局 ID 和详情 board ID 的格式化
 
 - `webapp/src/styles/main.scss`
   - `Global ID` 只读显示样式
@@ -318,6 +383,7 @@ go test ./api -run TestNonExistent -count=1
 - `webapp/src/mutator.ts`
   - 增加 `undeleteBlock`，调用恢复 API 并更新前端状态
   - 增加 `permanentlyDeleteBlock`，调用永久删除 API 并更新前端状态
+  - 对新建、删除、恢复、永久删除接口做 HTTP 状态检查
 
 - `webapp/src/octoClient.ts`
   - 增加 `/purge` 永久删除接口调用
@@ -475,8 +541,9 @@ file mattermost-plugin/server/dist/plugin-linux-loong64
 ## 已知边界
 
 - `taskId` 的严格唯一范围是单 board 的未删除卡片。
-- `globalTaskId` 的严格唯一范围是单插件进程串行写入场景下的未删除卡片。
-- 删除后复用编号会让历史日志中的旧编号和新卡片复用同一个短 ID；需要长期审计时应同时记录卡片标题、时间和代码提交。
+- `taskId` 的发号计数器持久化到 `system_settings`，永久删除后也不会主动复用旧编号。
+- `globalTaskId` 的严格唯一范围是单插件进程串行写入场景下的卡片生命周期编号。
+- 软删除和永久删除都不释放编号；编号空洞是为了保证代码引用和历史记录长期稳定。
 - 如果同一个数据库有多个插件进程同时写入，严格跨进程唯一需要数据库事务序列或唯一约束。
 - 当前 ID 存在 block fields JSON 中，不是独立索引列。
 - 全局编号计数器持久化在 `system_settings`；插件重启后不会为了恢复最大值扫描全库。
@@ -488,6 +555,6 @@ file mattermost-plugin/server/dist/plugin-linux-loong64
 最终插件包生成在工作区根目录：
 
 ```text
-focalboard-7.11.5-taskid-linux-loong64.tar.gz
-focalboard-7.11.5-taskid-linux-loong64.tar.gz.zst
+focalboard-7.11.6-taskid-linux-loong64.tar.gz
+focalboard-7.11.6-taskid-linux-loong64.tar.gz.zst
 ```

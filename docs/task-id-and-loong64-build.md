@@ -21,6 +21,9 @@ inside one board and `G-1` across boards.
   `Deleted cards` dialog. The purge endpoint only accepts already-deleted cards
   and removes their active/history records so they no longer appear in the
   restore list.
+- `7.11.6-taskid-linux-loong64`: changed delete semantics so soft and permanent
+  deletes do not release IDs, fixed deleted-card title/time display, moved the
+  global ID to card surfaces, and shows the board ID in card details.
 
 ## Card task ID behavior
 
@@ -143,7 +146,7 @@ make bundle
 Verify the final plugin package contains only the `linux-loong64` executable:
 
 ```bash
-tar -tzf mattermost-plugin/dist/focalboard-7.11.5.tar.gz | grep plugin-linux
-tar -xOzf mattermost-plugin/dist/focalboard-7.11.5.tar.gz focalboard/plugin.json
+tar -tzf mattermost-plugin/dist/focalboard-7.11.6.tar.gz | grep plugin-linux
+tar -xOzf mattermost-plugin/dist/focalboard-7.11.6.tar.gz focalboard/plugin.json
 file mattermost-plugin/server/dist/plugin-linux-loong64
 ```
