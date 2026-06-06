@@ -19,6 +19,8 @@ type Store interface {
 	GetBlocksWithParent(boardID, parentID string) ([]*model.Block, error)
 	GetBlocksByIDs(ids []string) ([]*model.Block, error)
 	GetBlocksWithType(boardID, blockType string) ([]*model.Block, error)
+	GetDeletedBlocksWithType(blockType string) ([]*model.Block, error)
+	GetDeletedBlocksForBoard(boardID string) ([]*model.Block, error)
 	GetSubTree2(boardID, blockID string, opts model.QuerySubtreeOptions) ([]*model.Block, error)
 	GetBlocksForBoard(boardID string) ([]*model.Block, error)
 	// @withTransaction

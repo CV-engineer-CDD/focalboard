@@ -548,6 +548,36 @@ func (mr *MockStoreMockRecorder) GetBlocksForBoard(arg0 interface{}) *gomock.Cal
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBlocksForBoard", reflect.TypeOf((*MockStore)(nil).GetBlocksForBoard), arg0)
 }
 
+// GetDeletedBlocksForBoard mocks base method.
+func (m *MockStore) GetDeletedBlocksForBoard(arg0 string) ([]*model.Block, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetDeletedBlocksForBoard", arg0)
+	ret0, _ := ret[0].([]*model.Block)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetDeletedBlocksForBoard indicates an expected call of GetDeletedBlocksForBoard.
+func (mr *MockStoreMockRecorder) GetDeletedBlocksForBoard(arg0 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetDeletedBlocksForBoard", reflect.TypeOf((*MockStore)(nil).GetDeletedBlocksForBoard), arg0)
+}
+
+// GetDeletedBlocksWithType mocks base method.
+func (m *MockStore) GetDeletedBlocksWithType(arg0 string) ([]*model.Block, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetDeletedBlocksWithType", arg0)
+	ret0, _ := ret[0].([]*model.Block)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetDeletedBlocksWithType indicates an expected call of GetDeletedBlocksWithType.
+func (mr *MockStoreMockRecorder) GetDeletedBlocksWithType(arg0 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetDeletedBlocksWithType", reflect.TypeOf((*MockStore)(nil).GetDeletedBlocksWithType), arg0)
+}
+
 // GetBlocksWithParent mocks base method.
 func (m *MockStore) GetBlocksWithParent(arg0, arg1 string) ([]*model.Block, error) {
 	m.ctrl.T.Helper()

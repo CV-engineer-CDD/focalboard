@@ -58,6 +58,9 @@ func TestCreateCard(t *testing.T) {
 			BoardID:   board.ID,
 			BlockType: model.TypeCard,
 		}).Return(existingBlocks, nil)
+		th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
+			BlockType: model.TypeCard,
+		}).Return(existingBlocks, nil)
 		expectCardGlobalTaskIDCounter(th, "3")
 		th.Store.EXPECT().GetBoard(board.ID).Return(board, nil)
 		th.Store.EXPECT().InsertBlock(gomock.AssignableToTypeOf(reflect.TypeOf(block)), userID).Return(nil)
@@ -144,12 +147,10 @@ func TestNextCardGlobalTaskIDResetsTimestampCounter(t *testing.T) {
 		},
 	}
 
-	th.Store.EXPECT().GetSystemSetting(cardGlobalTaskIDCounterKey).Return("1780519393936", nil)
 	th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
 		BlockType: model.TypeCard,
 	}).Return(blocks, nil)
-	th.Store.EXPECT().SetSystemSetting(cardGlobalTaskIDCounterKey, "2").Return(nil)
-	th.Store.EXPECT().SetSystemSetting(cardGlobalTaskIDCounterKey, "3").Return(nil)
+	expectCardGlobalTaskIDCounter(th, "1780519393936")
 
 	globalTaskID, err := th.App.nextCardGlobalTaskIDLocked()
 
@@ -733,16 +734,20 @@ func requireGlobalTaskIDByBlockTitle(t *testing.T, blocks []*model.Block, title 
 }
 
 func expectCardGlobalTaskIDCounter(th *TestHelper, initialValue string) {
-	counterValue := initialValue
-	th.Store.EXPECT().GetSystemSetting(cardGlobalTaskIDCounterKey).DoAndReturn(
-		func(string) (string, error) {
-			return counterValue, nil
+	settings := map[string]string{
+		cardGlobalTaskIDCounterKey: initialValue,
+	}
+	th.Store.EXPECT().GetSystemSetting(gomock.Any()).DoAndReturn(
+		func(key string) (string, error) {
+			return settings[key], nil
 		},
 	).AnyTimes()
-	th.Store.EXPECT().SetSystemSetting(cardGlobalTaskIDCounterKey, gomock.Any()).DoAndReturn(
-		func(_ string, value string) error {
-			counterValue = value
+	th.Store.EXPECT().SetSystemSetting(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(key string, value string) error {
+			settings[key] = value
 			return nil
 		},
 	).AnyTimes()
+	th.Store.EXPECT().GetDeletedBlocksForBoard(gomock.Any()).Return(nil, nil).AnyTimes()
+	th.Store.EXPECT().GetDeletedBlocksWithType(string(model.TypeCard)).Return(nil, nil).AnyTimes()
 }

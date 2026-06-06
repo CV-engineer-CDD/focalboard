@@ -376,6 +376,14 @@ func (s *SQLStore) GetBlocksForBoard(boardID string) ([]*model.Block, error) {
 
 }
 
+func (s *SQLStore) GetDeletedBlocksForBoard(boardID string) ([]*model.Block, error) {
+	return s.getDeletedBlocksForBoard(s.db, boardID)
+}
+
+func (s *SQLStore) GetDeletedBlocksWithType(blockType string) ([]*model.Block, error) {
+	return s.getDeletedBlocksWithType(s.db, blockType)
+}
+
 func (s *SQLStore) GetBlocksWithParent(boardID string, parentID string) ([]*model.Block, error) {
 	return s.getBlocksWithParent(s.db, boardID, parentID)
 

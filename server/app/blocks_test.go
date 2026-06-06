@@ -134,7 +134,7 @@ func TestDeleteBlock(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	t.Run("card delete releases highest task ids", func(t *testing.T) {
+	t.Run("card soft delete keeps task ids reserved", func(t *testing.T) {
 		boardID := testBoardID
 		board := &model.Board{ID: boardID}
 		block := &model.Block{
@@ -146,16 +146,6 @@ func TestDeleteBlock(t *testing.T) {
 				"globalTaskId": "G-3090",
 			},
 		}
-		activeBlock := &model.Block{
-			ID:      "card-3089",
-			BoardID: board.ID,
-			Type:    model.TypeCard,
-			Fields: map[string]interface{}{
-				"taskId":       "#3089",
-				"globalTaskId": "G-3089",
-			},
-		}
-
 		th.App.cardTaskIDMaxByBoard[boardID] = 3090
 		th.App.cardTaskIDBackfilledBoards[boardID] = true
 		th.App.cardGlobalTaskIDMax = 3090
@@ -164,21 +154,13 @@ func TestDeleteBlock(t *testing.T) {
 		th.Store.EXPECT().GetBlock(gomock.Eq("card-3090")).Return(block, nil)
 		th.Store.EXPECT().DeleteBlock(gomock.Eq("card-3090"), gomock.Eq("user-id-1")).Return(nil)
 		th.Store.EXPECT().GetBoard(gomock.Eq(testBoardID)).Return(board, nil)
-		th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
-			BoardID:   boardID,
-			BlockType: model.TypeCard,
-		}).Return([]*model.Block{activeBlock}, nil)
-		th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
-			BlockType: model.TypeCard,
-		}).Return([]*model.Block{activeBlock}, nil)
-		th.Store.EXPECT().SetSystemSetting(cardGlobalTaskIDCounterKey, "3089").Return(nil)
 		th.Store.EXPECT().GetMembersForBoard(boardID).Return([]*model.BoardMember{}, nil)
 
 		err := th.App.DeleteBlock("card-3090", "user-id-1")
 
 		require.NoError(t, err)
-		require.Equal(t, 3089, th.App.cardTaskIDMaxByBoard[boardID])
-		require.Equal(t, 3089, th.App.cardGlobalTaskIDMax)
+		require.Equal(t, 3090, th.App.cardTaskIDMaxByBoard[boardID])
+		require.Equal(t, 3090, th.App.cardGlobalTaskIDMax)
 	})
 
 	t.Run("error scenario", func(t *testing.T) {

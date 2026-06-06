@@ -191,6 +191,65 @@ func (s *SQLStore) getBlocksForBoard(db sq.BaseRunner, boardID string) ([]*model
 	return s.getBlocks(db, opts)
 }
 
+func (s *SQLStore) getDeletedBlocksForBoard(db sq.BaseRunner, boardID string) ([]*model.Block, error) {
+	return s.getLatestDeletedBlocks(db, boardID, model.TypeCard)
+}
+
+func (s *SQLStore) getDeletedBlocksWithType(db sq.BaseRunner, blockType string) ([]*model.Block, error) {
+	return s.getLatestDeletedBlocks(db, "", model.BlockType(blockType))
+}
+
+func (s *SQLStore) getLatestDeletedBlocks(db sq.BaseRunner, boardID string, blockType model.BlockType) ([]*model.Block, error) {
+	builder := s.getQueryBuilder(db).PlaceholderFormat(sq.Question)
+
+	sub := builder.
+		Select("bh2.id", "MAX(bh2.insert_at) AS max_insert_at").
+		From(s.tablePrefix + "blocks_history AS bh2").
+		GroupBy("bh2.id")
+
+	if boardID != "" {
+		sub = sub.Where(sq.Eq{"bh2.board_id": boardID})
+	}
+	if blockType != "" && blockType != model.TypeUnknown {
+		sub = sub.Where(sq.Eq{"bh2.type": blockType})
+	}
+
+	subQuery, subArgs, err := sub.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("getLatestDeletedBlocks unable to generate subquery: %w", err)
+	}
+
+	query := s.getQueryBuilder(db).
+		Select(s.blockFields("bh")...).
+		From(s.tablePrefix+"blocks_history AS bh").
+		InnerJoin("("+subQuery+") AS sub ON bh.id=sub.id AND bh.insert_at=sub.max_insert_at", subArgs...).
+		Where(sq.NotEq{"bh.delete_at": 0})
+
+	if s.dbType == model.PostgresDBType || s.dbType == model.SqliteDBType {
+		query = query.PlaceholderFormat(sq.Question)
+	}
+
+	sql, args, err := query.ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("getLatestDeletedBlocks unable to generate sql: %w", err)
+	}
+	if s.dbType == model.PostgresDBType || s.dbType == model.SqliteDBType {
+		sql, err = sq.Dollar.ReplacePlaceholders(sql)
+		if err != nil {
+			return nil, fmt.Errorf("getLatestDeletedBlocks unable to replace sql placeholders: %w", err)
+		}
+	}
+
+	rows, err := db.Query(sql, args...)
+	if err != nil {
+		s.logger.Error(`getLatestDeletedBlocks ERROR`, mlog.Err(err))
+		return nil, err
+	}
+	defer s.CloseRows(rows)
+
+	return s.blocksFromRows(rows)
+}
+
 func (s *SQLStore) blocksFromRows(rows *sql.Rows) ([]*model.Block, error) {
 	results := []*model.Block{}
 
