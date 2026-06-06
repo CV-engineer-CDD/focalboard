@@ -6,6 +6,7 @@ import {FormattedMessage, useIntl} from 'react-intl'
 import {Board, IPropertyTemplate} from '../../blocks/board'
 import {Card} from '../../blocks/card'
 import {BoardView} from '../../blocks/boardView'
+import {displayCardBoardID} from '../../cardIDs'
 
 import mutator from '../../mutator'
 import Button from '../../widgets/buttons/button'
@@ -130,19 +131,19 @@ const CardDetailProperties = (props: Props) => {
 
     return (
         <div className='octo-propertylist CardDetailProperties'>
-            {card.fields.globalTaskId &&
+            {card.fields.taskId &&
                 <div className='octo-propertyrow'>
                     <div className='octo-propertyname octo-propertyname--readonly'>
                         <FormattedMessage
-                            id='CardDetail.global-id'
-                            defaultMessage='Global ID'
+                            id='CardDetail.board-id'
+                            defaultMessage='Board ID'
                         />
                     </div>
                     <div
                         className='octo-propertyvalue octo-readonly-global-taskid'
-                        title={card.fields.globalTaskId}
+                        title={displayCardBoardID(card)}
                     >
-                        {card.fields.globalTaskId}
+                        {displayCardBoardID(card)}
                     </div>
                 </div>
             }

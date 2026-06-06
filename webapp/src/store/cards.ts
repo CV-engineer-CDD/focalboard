@@ -69,6 +69,25 @@ const limitCard = (isBoardTemplate: boolean, limitTimestamp: number, card: Card)
     }
 }
 
+const deletedCardFromUpdate = (incoming: Card, state: CardsState): Card => {
+    const existing = state.cards[incoming.id] || state.templates[incoming.id] || state.deletedCards?.[incoming.id]
+    if (!existing) {
+        return incoming
+    }
+
+    return {
+        ...existing,
+        ...incoming,
+        type: existing.type,
+        title: incoming.title || existing.title,
+        fields: {
+            ...existing.fields,
+            ...(incoming.fields || {}),
+        },
+        deleteAt: incoming.deleteAt || existing.deleteAt,
+    }
+}
+
 const cardsSlice = createSlice({
     name: 'cards',
     initialState: {
@@ -110,9 +129,10 @@ const cardsSlice = createSlice({
             state.deletedCards = state.deletedCards || {}
             for (const card of action.payload) {
                 if (card.deleteAt !== 0) {
+                    const deletedCard = deletedCardFromUpdate(card, state)
                     delete state.cards[card.id]
                     delete state.templates[card.id]
-                    state.deletedCards[card.id] = card
+                    state.deletedCards[card.id] = deletedCard
                 } else if (card.fields.isTemplate) {
                     state.templates[card.id] = card
                     delete state.deletedCards[card.id]

@@ -136,7 +136,7 @@ describe('components/viewHeader/viewHeaderActionsMenu', () => {
         expect(screen.getByRole('dialog')).toBeInTheDocument()
         expect(screen.getByText('Deleted card')).toBeInTheDocument()
         expect(screen.getByText('#42')).toBeInTheDocument()
-        expect(screen.getByText('G-42')).toBeInTheDocument()
+        expect(screen.getByText('Board 42')).toBeInTheDocument()
 
         userEvent.click(screen.getByRole('button', {name: 'Restore'}))
 

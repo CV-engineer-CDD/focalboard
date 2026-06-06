@@ -5,6 +5,7 @@ import {FormattedMessage, useIntl} from 'react-intl'
 
 import {Card} from '../../blocks/card'
 import {Board, IPropertyTemplate} from '../../blocks/board'
+import {displayCardGlobalID} from '../../cardIDs'
 import {Constants} from '../../constants'
 import mutator from '../../mutator'
 import Button from '../../widgets/buttons/button'
@@ -170,9 +171,9 @@ const TableRow = (props: Props) => {
                     <div className='octo-icon'>{card.fields.icon}</div>
                     <div
                         className='octo-taskid'
-                        title={card.fields.taskId || card.id}
+                        title={displayCardGlobalID(card)}
                     >
-                        {card.fields.taskId || card.id}
+                        {displayCardGlobalID(card)}
                     </div>
                     <Editable
                         ref={titleRef}

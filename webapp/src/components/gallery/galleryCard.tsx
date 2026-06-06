@@ -5,6 +5,7 @@ import {useIntl, FormattedMessage} from 'react-intl'
 
 import {Board, IPropertyTemplate} from '../../blocks/board'
 import {Card} from '../../blocks/card'
+import {displayCardGlobalID} from '../../cardIDs'
 import {ContentBlock} from '../../blocks/contentBlock'
 import {useSortable} from '../../hooks/sortable'
 import mutator from '../../mutator'
@@ -137,9 +138,9 @@ const GalleryCard = (props: Props) => {
                         { card.fields.icon ? <div className='octo-icon'>{card.fields.icon}</div> : undefined }
                         <div
                             className='octo-taskid'
-                            title={card.fields.taskId || card.id}
+                            title={displayCardGlobalID(card)}
                         >
-                            {card.fields.taskId || card.id}
+                            {displayCardGlobalID(card)}
                         </div>
                         <div
                             key='__title'

@@ -43,6 +43,13 @@ function updateAllBoardsAndBlocks(boards: Board[], blocks: Block[]) {
     })
 }
 
+async function requireOK(res: Response): Promise<Response> {
+    if (!res.ok) {
+        throw new Error(await res.text())
+    }
+    return res
+}
+
 //
 // The Mutator is used to make all changes to server state
 // It also ensures that the Undo-manager is called for each action
@@ -128,7 +135,7 @@ class Mutator {
     async insertBlock(boardId: string, block: Block, description = 'add', afterRedo?: (block: Block) => Promise<void>, beforeUndo?: (block: Block) => Promise<void>): Promise<Block> {
         return undoManager.perform(
             async () => {
-                const res = await octoClient.insertBlock(boardId, block)
+                const res = await requireOK(await octoClient.insertBlock(boardId, block))
                 const jsonres = await res.json()
                 const newBlock = jsonres[0] as Block
                 await afterRedo?.(newBlock)
@@ -136,7 +143,7 @@ class Mutator {
             },
             async (newBlock: Block) => {
                 await beforeUndo?.(newBlock)
-                await octoClient.deleteBlock(boardId, newBlock.id)
+                await requireOK(await octoClient.deleteBlock(boardId, newBlock.id))
             },
             description,
             this.undoGroupId,
@@ -147,7 +154,7 @@ class Mutator {
     async insertBlocks(boardId: string, blocks: Block[], description = 'add', afterRedo?: (blocks: Block[]) => Promise<void>, beforeUndo?: () => Promise<void>, sourceBoardID?: string) {
         return undoManager.perform(
             async () => {
-                const res = await octoClient.insertBlocks(boardId, blocks, sourceBoardID)
+                const res = await requireOK(await octoClient.insertBlocks(boardId, blocks, sourceBoardID))
                 const newBlocks = (await res.json()) as Block[]
                 updateAllBoardsAndBlocks([], newBlocks)
                 await afterRedo?.(newBlocks)
@@ -157,7 +164,7 @@ class Mutator {
                 await beforeUndo?.()
                 const awaits = []
                 for (const block of newBlocks) {
-                    awaits.push(octoClient.deleteBlock(boardId, block.id))
+                    awaits.push(octoClient.deleteBlock(boardId, block.id).then(requireOK))
                 }
                 await Promise.all(awaits)
             },
@@ -172,10 +179,10 @@ class Mutator {
         await undoManager.perform(
             async () => {
                 await beforeRedo?.()
-                await octoClient.deleteBlock(block.boardId, block.id)
+                await requireOK(await octoClient.deleteBlock(block.boardId, block.id))
             },
             async () => {
-                await octoClient.undeleteBlock(block.boardId, block.id)
+                await requireOK(await octoClient.undeleteBlock(block.boardId, block.id))
                 await afterUndo?.()
             },
             actualDescription,
@@ -188,7 +195,7 @@ class Mutator {
 
         return undoManager.perform(
             async () => {
-                const res = await octoClient.undeleteBlock(block.boardId, block.id)
+                const res = await requireOK(await octoClient.undeleteBlock(block.boardId, block.id))
                 const restoredBlock = await res.json() as Block
                 updateAllBoardsAndBlocks([], [restoredBlock])
                 await afterRedo?.(restoredBlock)
@@ -196,7 +203,7 @@ class Mutator {
             },
             async (restoredBlock: Block) => {
                 await beforeUndo?.(restoredBlock)
-                await octoClient.deleteBlock(restoredBlock.boardId, restoredBlock.id)
+                await requireOK(await octoClient.deleteBlock(restoredBlock.boardId, restoredBlock.id))
             },
             actualDescription,
             this.undoGroupId,
@@ -204,7 +211,7 @@ class Mutator {
     }
 
     async permanentlyDeleteBlock(block: Block): Promise<void> {
-        await octoClient.permanentlyDeleteBlock(block.boardId, block.id)
+        await requireOK(await octoClient.permanentlyDeleteBlock(block.boardId, block.id))
         store.dispatch(removeDeletedCard(block.id))
     }
 

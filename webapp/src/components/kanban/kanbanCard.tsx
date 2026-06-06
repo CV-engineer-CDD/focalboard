@@ -6,6 +6,7 @@ import {useIntl} from 'react-intl'
 
 import {Board, IPropertyTemplate} from '../../blocks/board'
 import {Card} from '../../blocks/card'
+import {displayCardGlobalID} from '../../cardIDs'
 import {useSortable} from '../../hooks/sortable'
 import mutator from '../../mutator'
 import TelemetryClient, {TelemetryActions, TelemetryCategory} from '../../telemetry/telemetryClient'
@@ -132,9 +133,9 @@ const KanbanCard = (props: Props) => {
                     { card.fields.icon ? <div className='octo-icon'>{card.fields.icon}</div> : undefined }
                     <div
                         className='octo-taskid'
-                        title={card.fields.taskId || card.id}
+                        title={displayCardGlobalID(card)}
                     >
-                        {card.fields.taskId || card.id}
+                        {displayCardGlobalID(card)}
                     </div>
                     <div
                         key='__title'

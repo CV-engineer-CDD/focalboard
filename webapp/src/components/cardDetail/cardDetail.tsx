@@ -5,6 +5,7 @@ import {FormattedMessage, useIntl, IntlShape} from 'react-intl'
 
 import {BlockIcons} from '../../blockIcons'
 import {Card} from '../../blocks/card'
+import {displayCardGlobalID} from '../../cardIDs'
 import {BoardView} from '../../blocks/boardView'
 import {Board} from '../../blocks/board'
 import {CommentBlock} from '../../blocks/commentBlock'
@@ -235,9 +236,9 @@ const CardDetail = (props: Props): JSX.Element|null => {
 
                 <div
                     className='CardDetail__taskid'
-                    title={props.card.fields.taskId || props.card.id}
+                    title={displayCardGlobalID(props.card)}
                 >
-                    {props.card.fields.taskId || props.card.id}
+                    {displayCardGlobalID(props.card)}
                 </div>
 
                 {/* Hidden (limited) card copy + CTA */}

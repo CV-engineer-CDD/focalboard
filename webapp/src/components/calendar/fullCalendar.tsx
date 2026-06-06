@@ -16,6 +16,7 @@ import mutator from '../../mutator'
 import {Board, IPropertyTemplate} from '../../blocks/board'
 import {BoardView} from '../../blocks/boardView'
 import {Card} from '../../blocks/card'
+import {displayCardGlobalID} from '../../cardIDs'
 import {DateProperty} from '../../properties/date/date'
 import propsRegistry from '../../properties'
 import Tooltip from '../../widgets/tooltip'
@@ -116,7 +117,7 @@ const CalendarFullView = (props: Props): JSX.Element|null => {
             return [{
                 id: card.id,
                 title: card.title,
-                extendedProps: {icon: card.fields.icon, taskId: card.fields.taskId || card.id},
+                extendedProps: {icon: card.fields.icon, taskId: displayCardGlobalID(card)},
                 properties: card.fields.properties,
                 allDay: true,
                 start: dateFrom,

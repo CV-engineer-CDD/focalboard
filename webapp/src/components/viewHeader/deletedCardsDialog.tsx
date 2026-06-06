@@ -5,6 +5,7 @@ import React, {useState} from 'react'
 import {FormattedMessage, useIntl} from 'react-intl'
 
 import {Card} from '../../blocks/card'
+import {displayCardBoardID, displayCardGlobalID} from '../../cardIDs'
 import mutator from '../../mutator'
 import Button from '../../widgets/buttons/button'
 import ConfirmationDialogBox, {ConfirmationDialogBoxProps} from '../confirmationDialogBox'
@@ -30,6 +31,10 @@ const DeletedCardsDialog = (props: Props): JSX.Element => {
             defaultMessage='Deleted cards'
         />
     )
+
+    const deletedAtDate = (deleteAt: number): Date => {
+        return new Date(deleteAt < 1000000000000 ? deleteAt * 1000 : deleteAt)
+    }
 
     const restoreCard = async (card: Card) => {
         setRestoringCardID(card.id)
@@ -100,9 +105,9 @@ const DeletedCardsDialog = (props: Props): JSX.Element => {
                         <div className='DeletedCardsDialog__list'>
                             {props.cards.map((card) => {
                                 const title = card.title || intl.formatMessage({id: 'DeletedCardsDialog.untitled', defaultMessage: 'Untitled'})
-                                const taskID = card.fields.taskId || card.id
-                                const globalTaskID = card.fields.globalTaskId || ''
-                                const deletedAt = card.deleteAt ? Utils.displayDateTime(new Date(card.deleteAt), intl) : ''
+                                const globalTaskID = displayCardGlobalID(card)
+                                const boardTaskID = displayCardBoardID(card)
+                                const deletedAt = card.deleteAt ? Utils.displayDateTime(deletedAtDate(card.deleteAt), intl) : ''
 
                                 return (
                                     <div
@@ -111,8 +116,16 @@ const DeletedCardsDialog = (props: Props): JSX.Element => {
                                     >
                                         <div className='DeletedCardsDialog__main'>
                                             <div className='DeletedCardsDialog__titleRow'>
-                                                <span className='DeletedCardsDialog__taskID'>{taskID}</span>
-                                                {globalTaskID && <span className='DeletedCardsDialog__globalID'>{globalTaskID}</span>}
+                                                <span className='DeletedCardsDialog__taskID'>{globalTaskID}</span>
+                                                {boardTaskID &&
+                                                    <span className='DeletedCardsDialog__globalID'>
+                                                        <FormattedMessage
+                                                            id='DeletedCardsDialog.board-id'
+                                                            defaultMessage='Board {id}'
+                                                            values={{id: boardTaskID}}
+                                                        />
+                                                    </span>
+                                                }
                                                 <span className='DeletedCardsDialog__title'>{title}</span>
                                             </div>
                                             {deletedAt &&
