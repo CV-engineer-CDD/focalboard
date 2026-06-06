@@ -428,6 +428,10 @@ func (a *App) DeleteBlockAndNotify(blockID string, modifiedBy string, disableNot
 		return err
 	}
 
+	if rErr := a.refreshCardIDCountersAfterDelete(block); rErr != nil {
+		a.logger.Error("Error refreshing card ID counters after deleting a card", mlog.Err(rErr), mlog.String("blockID", blockID))
+	}
+
 	a.blockChangeNotifier.Enqueue(func() error {
 		a.wsAdapter.BroadcastBlockDelete(board.TeamID, blockID, block.BoardID)
 		a.metrics.IncrementBlocksDeleted(1)
@@ -483,6 +487,10 @@ func (a *App) UndeleteBlock(blockID string, modifiedBy string) (*model.Block, er
 	}
 	if err != nil {
 		return nil, err
+	}
+
+	if rErr := a.reconcileUndeletedCardIDs(block, modifiedBy); rErr != nil {
+		return nil, rErr
 	}
 
 	board, err := a.store.GetBoard(block.BoardID)

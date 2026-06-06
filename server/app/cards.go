@@ -104,7 +104,7 @@ func (a *App) nextCardTaskIDLocked(boardID string) (string, error) {
 
 	maxNumber := 0
 	for _, block := range blocks {
-		if block == nil || block.Fields == nil {
+		if !isActiveCardBlock(block) || block.Fields == nil {
 			continue
 		}
 
@@ -158,6 +158,242 @@ func (a *App) nextCardGlobalTaskIDLocked() (string, error) {
 	return fmt.Sprintf("%s%d", cardGlobalTaskIDPrefix, a.cardGlobalTaskIDMax), nil
 }
 
+func (a *App) refreshCardIDCountersAfterDelete(block *model.Block) error {
+	if block == nil || block.Type != model.TypeCard {
+		return nil
+	}
+
+	unlock := a.lockCardTaskIDs(block.BoardID)
+	defer unlock()
+	a.cardGlobalTaskIDMux.Lock()
+	defer a.cardGlobalTaskIDMux.Unlock()
+
+	if block.Fields != nil {
+		taskID, _ := block.Fields["taskId"].(string)
+		if err := a.refreshCardTaskIDCounterAfterDeleteLocked(block.BoardID, taskID); err != nil {
+			return err
+		}
+
+		globalTaskID, _ := block.Fields["globalTaskId"].(string)
+		if err := a.refreshCardGlobalTaskIDCounterAfterDeleteLocked(globalTaskID); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (a *App) refreshCardTaskIDCounterAfterDeleteLocked(boardID string, taskID string) error {
+	deletedNumber, ok := cardTaskIDNumber(taskID)
+	if !ok {
+		return nil
+	}
+
+	a.cardTaskIDStateMux.Lock()
+	currentMax, loaded := a.cardTaskIDMaxByBoard[boardID]
+	a.cardTaskIDStateMux.Unlock()
+	if !loaded || deletedNumber < currentMax {
+		return nil
+	}
+
+	maxNumber, err := a.loadCardTaskIDMaxForBoardLocked(boardID)
+	if err != nil {
+		return err
+	}
+
+	a.cardTaskIDStateMux.Lock()
+	a.cardTaskIDMaxByBoard[boardID] = maxNumber
+	a.cardTaskIDBackfilledBoards[boardID] = true
+	a.cardTaskIDStateMux.Unlock()
+	return nil
+}
+
+func (a *App) refreshCardGlobalTaskIDCounterAfterDeleteLocked(globalTaskID string) error {
+	deletedNumber, ok := cardGlobalTaskIDNumber(globalTaskID)
+	if !ok {
+		return nil
+	}
+
+	currentMax := a.cardGlobalTaskIDMax
+	if !a.cardGlobalTaskIDCounterLoaded {
+		counterValue, err := a.store.GetSystemSetting(cardGlobalTaskIDCounterKey)
+		if err != nil {
+			return err
+		}
+		if counterValue == "" {
+			return nil
+		}
+		counter, cErr := strconv.Atoi(counterValue)
+		if cErr != nil {
+			return cErr
+		}
+		currentMax = counter
+	}
+	if !isTimestampCardGlobalTaskIDNumber(currentMax) && deletedNumber < currentMax {
+		return nil
+	}
+
+	maxNumber, err := a.loadCardGlobalTaskIDMaxLocked()
+	if err != nil {
+		return err
+	}
+	a.cardGlobalTaskIDMax = maxNumber
+	a.cardGlobalTaskIDCounterLoaded = true
+	return nil
+}
+
+func (a *App) loadCardTaskIDMaxForBoardLocked(boardID string) (int, error) {
+	opts := model.QueryBlocksOptions{
+		BoardID:   boardID,
+		BlockType: model.TypeCard,
+	}
+
+	blocks, err := a.store.GetBlocks(opts)
+	if err != nil {
+		return 0, err
+	}
+
+	maxNumber := 0
+	for _, block := range blocks {
+		if !isActiveCardBlock(block) || block.Fields == nil {
+			continue
+		}
+
+		taskID, _ := block.Fields["taskId"].(string)
+		if number, ok := cardTaskIDNumber(taskID); ok && number > maxNumber {
+			maxNumber = number
+		}
+	}
+	return maxNumber, nil
+}
+
+func (a *App) reconcileUndeletedCardIDs(block *model.Block, modifiedBy string) error {
+	if !isActiveCardBlock(block) {
+		return nil
+	}
+
+	unlock := a.lockCardTaskIDs(block.BoardID)
+	defer unlock()
+	a.cardGlobalTaskIDMux.Lock()
+	defer a.cardGlobalTaskIDMux.Unlock()
+
+	if block.Fields == nil {
+		block.Fields = make(map[string]interface{})
+	}
+
+	updatedFields := make(map[string]interface{})
+	taskMax, usedTaskIDs, err := a.activeCardTaskIDUsageForBoardLocked(block.BoardID, block.ID)
+	if err != nil {
+		return err
+	}
+	taskID, _ := block.Fields["taskId"].(string)
+	taskNumber, taskOK := cardTaskIDNumber(taskID)
+	_, taskConflict := usedTaskIDs[taskNumber]
+	if !taskOK || taskConflict {
+		taskMax++
+		taskID = fmt.Sprintf("%s%d", cardTaskIDPrefix, taskMax)
+		block.Fields["taskId"] = taskID
+		updatedFields["taskId"] = taskID
+	} else if taskNumber > taskMax {
+		taskMax = taskNumber
+	}
+
+	globalMax, usedGlobalTaskIDs, err := a.activeCardGlobalTaskIDUsageLocked(block.ID)
+	if err != nil {
+		return err
+	}
+	globalTaskID, _ := block.Fields["globalTaskId"].(string)
+	globalNumber, globalOK := cardGlobalTaskIDNumber(globalTaskID)
+	_, globalConflict := usedGlobalTaskIDs[globalNumber]
+	if !globalOK || globalConflict {
+		globalMax++
+		globalTaskID = fmt.Sprintf("%s%d", cardGlobalTaskIDPrefix, globalMax)
+		block.Fields["globalTaskId"] = globalTaskID
+		updatedFields["globalTaskId"] = globalTaskID
+		setCardGlobalTaskIDProperty(block, globalTaskID)
+		updatedFields["properties"] = block.Fields["properties"]
+	} else {
+		if globalNumber > globalMax {
+			globalMax = globalNumber
+		}
+		if setCardGlobalTaskIDProperty(block, globalTaskID) {
+			updatedFields["properties"] = block.Fields["properties"]
+		}
+	}
+
+	a.cardTaskIDStateMux.Lock()
+	a.cardTaskIDMaxByBoard[block.BoardID] = taskMax
+	a.cardTaskIDBackfilledBoards[block.BoardID] = true
+	a.cardTaskIDStateMux.Unlock()
+	a.cardGlobalTaskIDMax = globalMax
+	a.cardGlobalTaskIDCounterLoaded = true
+	if err := a.store.SetSystemSetting(cardGlobalTaskIDCounterKey, strconv.Itoa(globalMax)); err != nil {
+		return err
+	}
+
+	if len(updatedFields) == 0 {
+		return nil
+	}
+	return a.store.PatchBlock(block.ID, &model.BlockPatch{UpdatedFields: updatedFields}, modifiedBy)
+}
+
+func (a *App) activeCardTaskIDUsageForBoardLocked(boardID string, excludedBlockID string) (int, map[int]struct{}, error) {
+	opts := model.QueryBlocksOptions{
+		BoardID:   boardID,
+		BlockType: model.TypeCard,
+	}
+
+	blocks, err := a.store.GetBlocks(opts)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	maxNumber := 0
+	usedNumbers := make(map[int]struct{})
+	for _, block := range blocks {
+		if !isActiveCardBlock(block) || block.ID == excludedBlockID || block.Fields == nil {
+			continue
+		}
+
+		taskID, _ := block.Fields["taskId"].(string)
+		if number, ok := cardTaskIDNumber(taskID); ok {
+			usedNumbers[number] = struct{}{}
+			if number > maxNumber {
+				maxNumber = number
+			}
+		}
+	}
+	return maxNumber, usedNumbers, nil
+}
+
+func (a *App) activeCardGlobalTaskIDUsageLocked(excludedBlockID string) (int, map[int]struct{}, error) {
+	opts := model.QueryBlocksOptions{
+		BlockType: model.TypeCard,
+	}
+
+	blocks, err := a.store.GetBlocks(opts)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	maxNumber := 0
+	usedNumbers := make(map[int]struct{})
+	for _, block := range blocks {
+		if !isActiveCardBlock(block) || block.ID == excludedBlockID || block.Fields == nil {
+			continue
+		}
+
+		globalTaskID, _ := block.Fields["globalTaskId"].(string)
+		if number, ok := cardGlobalTaskIDNumber(globalTaskID); ok {
+			usedNumbers[number] = struct{}{}
+			if number > maxNumber {
+				maxNumber = number
+			}
+		}
+	}
+	return maxNumber, usedNumbers, nil
+}
+
 func (a *App) loadCardGlobalTaskIDMaxLocked() (int, error) {
 	opts := model.QueryBlocksOptions{
 		BlockType: model.TypeCard,
@@ -170,7 +406,7 @@ func (a *App) loadCardGlobalTaskIDMaxLocked() (int, error) {
 
 	maxNumber := 0
 	for _, block := range blocks {
-		if block == nil || block.Fields == nil {
+		if !isActiveCardBlock(block) || block.Fields == nil {
 			continue
 		}
 
@@ -224,7 +460,7 @@ func (a *App) ensureCardTaskIDsForBlocksLocked(boardID string, blocks []*model.B
 
 	cardBlocks := make([]*model.Block, 0, len(blocks))
 	for _, block := range blocks {
-		if block == nil || block.Type != model.TypeCard {
+		if !isActiveCardBlock(block) {
 			continue
 		}
 		cardBlocks = append(cardBlocks, block)
@@ -317,7 +553,7 @@ func (a *App) ensureCardGlobalTaskIDsForBlocksLocked(boardID string, blocks []*m
 
 	cardBlocks := make([]*model.Block, 0, len(blocks))
 	for _, block := range blocks {
-		if block == nil || block.Type != model.TypeCard {
+		if !isActiveCardBlock(block) {
 			continue
 		}
 		cardBlocks = append(cardBlocks, block)
@@ -428,6 +664,10 @@ func cardGlobalTaskIDNumber(globalTaskID string) (int, bool) {
 
 func isTimestampCardGlobalTaskIDNumber(number int) bool {
 	return number >= cardGlobalTaskIDTimestampFloor
+}
+
+func isActiveCardBlock(block *model.Block) bool {
+	return block != nil && block.Type == model.TypeCard && block.DeleteAt == 0
 }
 
 func setCardGlobalTaskIDProperty(block *model.Block, globalTaskID string) bool {

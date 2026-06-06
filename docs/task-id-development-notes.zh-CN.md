@@ -102,6 +102,8 @@ property template，避免污染用户自定义列配置。
 - 旧 `globalTaskId` 只在当前打开或写入的 board 内懒迁移，并在进程内按 board 缓存。
 - 打开整板时复用已经取回的 board blocks 做迁移，避免打开前额外查询一次当前 board 卡片。
 - 新建/复制卡片直接从持久计数器递增，不再重复全量扫描。
+- 软删除卡片不再参与后续最大编号计算；如果删除的是当前最高号，缓存和全局计数器会回退。
+- 恢复已删除卡片时，如果原编号已被新卡片复用，恢复的卡片会自动获得新的不冲突编号。
 - board 内编号仍使用 board 级锁。
 - 全局编号使用全局锁。
 - 缓存 map 增加独立锁，避免不同 board 并发写缓存导致 Go map race。
@@ -230,6 +232,12 @@ property template，避免污染用户自定义列配置。
 - 生成新的 `G-N`
 - 不沿用源卡片编号
 
+删除/恢复卡片：
+
+- 删除卡片后，该卡片不再占用 board 内 `#N` 和全局 `G-N`
+- 如果删除的是当前最高编号，下一张新卡片会复用这个最高编号
+- 如果被删除的卡片后来恢复，而原编号已被其他活动卡片复用，恢复卡片会重新分配新编号
+
 打开旧 board：
 
 - 首次加载时迁移旧 `taskId`
@@ -286,8 +294,9 @@ file mattermost-plugin/server/dist/plugin-linux-loong64
 
 ## 已知边界
 
-- `taskId` 的严格唯一范围是单 board。
-- `globalTaskId` 的严格唯一范围是单插件进程串行写入场景。
+- `taskId` 的严格唯一范围是单 board 的未删除卡片。
+- `globalTaskId` 的严格唯一范围是单插件进程串行写入场景下的未删除卡片。
+- 删除后复用编号会让历史日志中的旧编号和新卡片复用同一个短 ID；需要长期审计时应同时记录卡片标题、时间和代码提交。
 - 如果同一个数据库有多个插件进程同时写入，严格跨进程唯一需要数据库事务序列或唯一约束。
 - 当前 ID 存在 block fields JSON 中，不是独立索引列。
 - 全局编号计数器持久化在 `system_settings`；插件重启后不会为了恢复最大值扫描全库。
@@ -299,6 +308,6 @@ file mattermost-plugin/server/dist/plugin-linux-loong64
 最终插件包生成在工作区根目录：
 
 ```text
-focalboard-7.11.2-taskid-linux-loong64.tar.gz
-focalboard-7.11.2-taskid-linux-loong64.tar.gz.zst
+focalboard-7.11.3-taskid-linux-loong64.tar.gz
+focalboard-7.11.3-taskid-linux-loong64.tar.gz.zst
 ```

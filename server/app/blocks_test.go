@@ -134,6 +134,53 @@ func TestDeleteBlock(t *testing.T) {
 		require.NoError(t, err)
 	})
 
+	t.Run("card delete releases highest task ids", func(t *testing.T) {
+		boardID := testBoardID
+		board := &model.Board{ID: boardID}
+		block := &model.Block{
+			ID:      "card-3090",
+			BoardID: board.ID,
+			Type:    model.TypeCard,
+			Fields: map[string]interface{}{
+				"taskId":       "#3090",
+				"globalTaskId": "G-3090",
+			},
+		}
+		activeBlock := &model.Block{
+			ID:      "card-3089",
+			BoardID: board.ID,
+			Type:    model.TypeCard,
+			Fields: map[string]interface{}{
+				"taskId":       "#3089",
+				"globalTaskId": "G-3089",
+			},
+		}
+
+		th.App.cardTaskIDMaxByBoard[boardID] = 3090
+		th.App.cardTaskIDBackfilledBoards[boardID] = true
+		th.App.cardGlobalTaskIDMax = 3090
+		th.App.cardGlobalTaskIDCounterLoaded = true
+
+		th.Store.EXPECT().GetBlock(gomock.Eq("card-3090")).Return(block, nil)
+		th.Store.EXPECT().DeleteBlock(gomock.Eq("card-3090"), gomock.Eq("user-id-1")).Return(nil)
+		th.Store.EXPECT().GetBoard(gomock.Eq(testBoardID)).Return(board, nil)
+		th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
+			BoardID:   boardID,
+			BlockType: model.TypeCard,
+		}).Return([]*model.Block{activeBlock}, nil)
+		th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
+			BlockType: model.TypeCard,
+		}).Return([]*model.Block{activeBlock}, nil)
+		th.Store.EXPECT().SetSystemSetting(cardGlobalTaskIDCounterKey, "3089").Return(nil)
+		th.Store.EXPECT().GetMembersForBoard(boardID).Return([]*model.BoardMember{}, nil)
+
+		err := th.App.DeleteBlock("card-3090", "user-id-1")
+
+		require.NoError(t, err)
+		require.Equal(t, 3089, th.App.cardTaskIDMaxByBoard[boardID])
+		require.Equal(t, 3089, th.App.cardGlobalTaskIDMax)
+	})
+
 	t.Run("error scenario", func(t *testing.T) {
 		boardID := testBoardID
 		board := &model.Board{ID: boardID}
@@ -170,6 +217,61 @@ func TestUndeleteBlock(t *testing.T) {
 		th.Store.EXPECT().GetMembersForBoard(boardID).Return([]*model.BoardMember{}, nil)
 		_, err := th.App.UndeleteBlock("block-id", "user-id-1")
 		require.NoError(t, err)
+	})
+
+	t.Run("card undelete gets new ids when released ids were reused", func(t *testing.T) {
+		boardID := testBoardID
+		board := &model.Board{ID: boardID}
+		block := &model.Block{
+			ID:      "old-card-3090",
+			BoardID: board.ID,
+			Type:    model.TypeCard,
+			Fields: map[string]interface{}{
+				"taskId":       "#3090",
+				"globalTaskId": "G-3090",
+			},
+		}
+		activeBlock := &model.Block{
+			ID:      "new-card-3090",
+			BoardID: board.ID,
+			Type:    model.TypeCard,
+			Fields: map[string]interface{}{
+				"taskId":       "#3090",
+				"globalTaskId": "G-3090",
+			},
+		}
+		expectedProperties := map[string]interface{}{cardGlobalTaskIDProperty: "G-3091"}
+
+		th.Store.EXPECT().GetBlockHistory(
+			gomock.Eq("old-card-3090"),
+			gomock.Eq(model.QueryBlockHistoryOptions{Limit: 1, Descending: true}),
+		).Return([]*model.Block{block}, nil)
+		th.Store.EXPECT().UndeleteBlock(gomock.Eq("old-card-3090"), gomock.Eq("user-id-1")).Return(nil)
+		th.Store.EXPECT().GetBlock(gomock.Eq("old-card-3090")).Return(block, nil)
+		th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
+			BoardID:   boardID,
+			BlockType: model.TypeCard,
+		}).Return([]*model.Block{activeBlock, block}, nil)
+		th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
+			BlockType: model.TypeCard,
+		}).Return([]*model.Block{activeBlock, block}, nil)
+		th.Store.EXPECT().SetSystemSetting(cardGlobalTaskIDCounterKey, "3091").Return(nil)
+		th.Store.EXPECT().PatchBlock("old-card-3090", &model.BlockPatch{
+			UpdatedFields: map[string]interface{}{
+				"taskId":       "#3091",
+				"globalTaskId": "G-3091",
+				"properties":   expectedProperties,
+			},
+		}, "user-id-1").Return(nil)
+		th.Store.EXPECT().GetBoard(boardID).Return(board, nil)
+		th.Store.EXPECT().GetMembersForBoard(boardID).Return([]*model.BoardMember{}, nil)
+
+		undeletedBlock, err := th.App.UndeleteBlock("old-card-3090", "user-id-1")
+
+		require.NoError(t, err)
+		require.Equal(t, "#3091", undeletedBlock.Fields["taskId"])
+		require.Equal(t, "G-3091", undeletedBlock.Fields["globalTaskId"])
+		require.Equal(t, expectedProperties, undeletedBlock.Fields["properties"])
 	})
 
 	t.Run("error scenario", func(t *testing.T) {
