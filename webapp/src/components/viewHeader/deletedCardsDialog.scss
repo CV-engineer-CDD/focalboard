@@ -1,0 +1,83 @@
+.DeletedCardsDialog {
+    .dialog {
+        max-width: 680px;
+    }
+}
+
+.DeletedCardsDialog__content {
+    padding: 0 24px 24px;
+}
+
+.DeletedCardsDialog__empty {
+    display: flex;
+    min-height: 120px;
+    align-items: center;
+    justify-content: center;
+    color: rgba(var(--center-channel-color-rgb), 0.64);
+    font-size: 14px;
+}
+
+.DeletedCardsDialog__list {
+    display: flex;
+    max-height: 440px;
+    flex-direction: column;
+    overflow-y: auto;
+    border: 1px solid rgba(var(--center-channel-color-rgb), 0.12);
+    border-radius: 4px;
+}
+
+.DeletedCardsDialog__row {
+    display: grid;
+    min-height: 64px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(var(--center-channel-color-rgb), 0.08);
+
+    &:last-child {
+        border-bottom: 0;
+    }
+}
+
+.DeletedCardsDialog__main {
+    min-width: 0;
+}
+
+.DeletedCardsDialog__titleRow {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 8px;
+}
+
+.DeletedCardsDialog__taskID,
+.DeletedCardsDialog__globalID {
+    flex: 0 0 auto;
+    color: rgba(var(--center-channel-color-rgb), 0.72);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 18px;
+}
+
+.DeletedCardsDialog__globalID {
+    color: rgba(var(--center-channel-color-rgb), 0.56);
+}
+
+.DeletedCardsDialog__title {
+    min-width: 0;
+    overflow: hidden;
+    color: rgb(var(--center-channel-color-rgb));
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 20px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.DeletedCardsDialog__deletedAt {
+    margin-top: 2px;
+    color: rgba(var(--center-channel-color-rgb), 0.56);
+    font-size: 12px;
+    line-height: 18px;
+}

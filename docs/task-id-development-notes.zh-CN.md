@@ -16,6 +16,51 @@ Mattermost Boards 插件包期间的需求演进、实现调整、问题修复�
 - 只构建 `linux-loong64` 插件。
 - 不破坏 Mattermost 7.10/7.11 Boards 原有使用流程。
 
+## 版本变更记录
+
+### `7.11.0-taskid-boardonly-linux-loong64`
+
+- 用途：保留的可回退版本。
+- 功能：只提供 board 内短编号 `#N`。
+- 修复：新建卡片、复制卡片、旧卡片迁移都会生成 board 内数字编号。
+- 限制：没有跨 board 的全局 ID；不同 board 中可能同时存在 `#1`、`#2`。
+- 产物：
+  - `focalboard-7.11.0-taskid-boardonly-linux-loong64.tar.gz`
+  - `focalboard-7.11.0-taskid-boardonly-linux-loong64.tar.gz.zst`
+
+### `7.11.1-taskid-linux-loong64`
+
+- 功能：在 board 内 `#N` 基础上增加跨 board 的 `globalTaskId`，显示为 `G-N`。
+- 功能：`globalTaskId` 同时写入 `fields.globalTaskId` 和 `fields.properties.__globalTaskId`。
+- 功能：卡片详情属性区显示只读 `Global ID`。
+- 修复：插件 manifest 版本从 `7.11.0` 升到 `7.11.1`，避免同版本上传时 Mattermost 无法正常升级重启插件。
+- 问题：最初为了避免全库扫描，缺失全局计数器时从毫秒时间戳起步，可能生成 `G-1780519393936` 这种不可读编号。
+- 问题：全局迁移和 board 打开路径仍有性能压力。
+
+### `7.11.2-taskid-linux-loong64`
+
+- 修复：停止使用毫秒时间戳作为全局 ID 起点。
+- 修复：如果系统设置中已存在时间戳形态计数器，会扫描已有正常 `G-N` 并重置为正常最大值。
+- 修复：历史上已生成的 `G-1780...` 这类时间戳 ID 会被视为无效旧值，在对应 board 迁移时重新分配正常 `G-N`。
+- 保持：新卡、复制卡仍由服务端生成 `#N` 和 `G-N`，客户端传入值会被覆盖。
+
+### `7.11.3-taskid-linux-loong64`
+
+- 修复：软删除卡片不再占用后续编号。
+- 修复：如果删除的是当前最高 `#N` 或 `G-N`，内存缓存和全局系统计数器会回退，下一张新卡可以复用该最高号。
+- 修复：恢复已删除卡片时，如果原编号已被新卡复用，恢复卡片会自动获得新的不冲突编号。
+- 行为变化：编号唯一范围明确为“当前未删除卡片”；历史日志中如果只记录短 ID，删除复用后可能出现旧记录和新卡共用同一短 ID 的情况。
+
+### `7.11.4-taskid-linux-loong64`
+
+- 功能：board 顶部三点菜单增加 `Deleted cards` 入口。
+- 功能：弹窗列出当前 board 已删除卡片，显示 board 内 `#N`、全局 `G-N`、标题和删除时间。
+- 功能：弹窗中可点击 `Restore` 恢复卡片。
+- 修复：前端 Redux store 新增 `deletedCards`，避免已删除卡片混入正常看板/表格，同时能在恢复弹窗中展示。
+- 修复：恢复操作调用已有 `undeleteBlock` API，并把返回的卡片写回前端状态。
+- 验证：`webapp npm run check`、主 webapp `npm run pack`、插件 webapp `npm run build` 均通过。
+- 已知：当前 loong64 环境无法运行 Jest，原因是 `@swc/core` 没有 loong64 Linux native binding；已同步更新相关 snapshot 文本。
+
 ## 需求演进
 
 ### 第一阶段：board 内唯一 ID
@@ -237,6 +282,7 @@ property template，避免污染用户自定义列配置。
 - 删除卡片后，该卡片不再占用 board 内 `#N` 和全局 `G-N`
 - 如果删除的是当前最高编号，下一张新卡片会复用这个最高编号
 - 如果被删除的卡片后来恢复，而原编号已被其他活动卡片复用，恢复卡片会重新分配新编号
+- UI 在 board 顶部三点菜单中增加 `Deleted cards` 入口，列出当前 board 已删除卡片并支持恢复
 
 打开旧 board：
 
@@ -287,8 +333,8 @@ make bundle
 包校验：
 
 ```bash
-tar -xOzf mattermost-plugin/dist/focalboard-7.11.0.tar.gz focalboard/plugin.json
-tar -tzf mattermost-plugin/dist/focalboard-7.11.0.tar.gz | grep plugin-linux
+tar -xOzf mattermost-plugin/dist/focalboard-7.11.4.tar.gz focalboard/plugin.json
+tar -tzf mattermost-plugin/dist/focalboard-7.11.4.tar.gz | grep plugin-linux
 file mattermost-plugin/server/dist/plugin-linux-loong64
 ```
 
@@ -308,6 +354,6 @@ file mattermost-plugin/server/dist/plugin-linux-loong64
 最终插件包生成在工作区根目录：
 
 ```text
-focalboard-7.11.3-taskid-linux-loong64.tar.gz
-focalboard-7.11.3-taskid-linux-loong64.tar.gz.zst
+focalboard-7.11.4-taskid-linux-loong64.tar.gz
+focalboard-7.11.4-taskid-linux-loong64.tar.gz.zst
 ```

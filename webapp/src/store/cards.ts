@@ -27,6 +27,7 @@ type CardsState = {
     current: string
     limitTimestamp: number
     cards: {[key: string]: Card}
+    deletedCards?: {[key: string]: Card}
     templates: {[key: string]: Card}
     cardHiddenWarning: boolean
 }
@@ -74,6 +75,7 @@ const cardsSlice = createSlice({
         current: '',
         limitTimestamp: 0,
         cards: {},
+        deletedCards: {},
         templates: {},
         cardHiddenWarning: false,
     } as CardsState,
@@ -89,6 +91,8 @@ const cardsSlice = createSlice({
         },
         addCard: (state, action: PayloadAction<Card>) => {
             state.cards[action.payload.id] = action.payload
+            state.deletedCards = state.deletedCards || {}
+            delete state.deletedCards[action.payload.id]
         },
         showCardHiddenWarning: (state, action: PayloadAction<boolean>) => {
             state.cardHiddenWarning = action.payload
@@ -97,14 +101,18 @@ const cardsSlice = createSlice({
             state.templates[action.payload.id] = action.payload
         },
         updateCards: (state: CardsState, action: PayloadAction<Card[]>) => {
+            state.deletedCards = state.deletedCards || {}
             for (const card of action.payload) {
                 if (card.deleteAt !== 0) {
                     delete state.cards[card.id]
                     delete state.templates[card.id]
+                    state.deletedCards[card.id] = card
                 } else if (card.fields.isTemplate) {
                     state.templates[card.id] = card
+                    delete state.deletedCards[card.id]
                 } else {
                     state.cards[card.id] = card
+                    delete state.deletedCards[card.id]
                 }
             }
         },
@@ -117,9 +125,12 @@ const cardsSlice = createSlice({
         })
         builder.addCase(initialReadOnlyLoad.fulfilled, (state, action) => {
             state.cards = {}
+            state.deletedCards = {}
             state.templates = {}
             for (const block of action.payload.blocks) {
-                if (block.type === 'card' && block.fields.isTemplate) {
+                if (block.type === 'card' && block.deleteAt !== 0) {
+                    state.deletedCards[block.id] = block as Card
+                } else if (block.type === 'card' && block.fields.isTemplate) {
                     state.templates[block.id] = block as Card
                 } else if (block.type === 'card' && !block.fields.isTemplate) {
                     state.cards[block.id] = block as Card
@@ -131,9 +142,12 @@ const cardsSlice = createSlice({
         })
         builder.addCase(loadBoardData.fulfilled, (state, action) => {
             state.cards = {}
+            state.deletedCards = {}
             state.templates = {}
             for (const block of action.payload.blocks) {
-                if (block.type === 'card' && block.fields.isTemplate) {
+                if (block.type === 'card' && block.deleteAt !== 0) {
+                    state.deletedCards[block.id] = block as Card
+                } else if (block.type === 'card' && block.fields.isTemplate) {
                     state.templates[block.id] = block as Card
                 } else if (block.type === 'card' && !block.fields.isTemplate) {
                     state.cards[block.id] = block as Card
@@ -147,6 +161,7 @@ export const {updateCards, addCard, addTemplate, setCurrent, setLimitTimestamp, 
 export const {reducer} = cardsSlice
 
 export const getCards = (state: RootState): {[key: string]: Card} => state.cards.cards
+export const getDeletedCards = (state: RootState): {[key: string]: Card} => state.cards.deletedCards || {}
 
 export const getSortedCards = createSelector(
     getCards,
@@ -175,6 +190,14 @@ export const getCurrentBoardCards = createSelector(
     getCards,
     (boardId, cards) => {
         return Object.values(cards).filter((c) => c.boardId === boardId) as Card[]
+    },
+)
+
+export const getCurrentBoardDeletedCards = createSelector(
+    (state: RootState) => state.boards.current,
+    getDeletedCards,
+    (boardId, cards) => {
+        return Object.values(cards).filter((c) => c.boardId === boardId).sort((a, b) => b.deleteAt - a.deleteAt) as Card[]
     },
 )
 

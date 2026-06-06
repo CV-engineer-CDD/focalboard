@@ -1,6 +1,6 @@
 // Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
-import React from 'react'
+import React, {useMemo, useState} from 'react'
 import {useIntl, IntlShape} from 'react-intl'
 
 import {CsvExporter} from '../../csvExporter'
@@ -13,9 +13,13 @@ import OptionsIcon from '../../widgets/icons/options'
 import Menu from '../../widgets/menu'
 import MenuWrapper from '../../widgets/menuWrapper'
 import {Utils} from '../../utils'
+import {useAppSelector} from '../../store/hooks'
+import {getDeletedCards} from '../../store/cards'
 
 import ModalWrapper from '../modalWrapper'
 import {sendFlashMessage} from '../flashMessages'
+
+import DeletedCardsDialog from './deletedCardsDialog'
 
 type Props = {
     board: Board
@@ -97,6 +101,11 @@ function onExportCsvTrigger(board: Board, activeView: BoardView, cards: Card[], 
 const ViewHeaderActionsMenu = (props: Props) => {
     const {board, activeView, cards} = props
     const intl = useIntl()
+    const [showDeletedCards, setShowDeletedCards] = useState(false)
+    const deletedCardsByID = useAppSelector(getDeletedCards)
+    const deletedCards = useMemo(() => {
+        return Object.values(deletedCardsByID).filter((card) => card.boardId === board.id).sort((a, b) => b.deleteAt - a.deleteAt)
+    }, [board.id, deletedCardsByID])
 
     return (
         <ModalWrapper>
@@ -112,6 +121,14 @@ const ViewHeaderActionsMenu = (props: Props) => {
                         id='exportBoardArchive'
                         name={intl.formatMessage({id: 'ViewHeader.export-board-archive', defaultMessage: 'Export board archive'})}
                         onClick={() => Archiver.exportBoardArchive(board)}
+                    />
+                    <Menu.Text
+                        id='deletedCards'
+                        name={intl.formatMessage(
+                            {id: 'ViewHeader.deleted-cards', defaultMessage: 'Deleted cards ({count})'},
+                            {count: deletedCards.length},
+                        )}
+                        onClick={() => setShowDeletedCards(true)}
                     />
                     {/*
                     <Menu.Separator/>
@@ -139,6 +156,12 @@ const ViewHeaderActionsMenu = (props: Props) => {
                     */}
                 </Menu>
             </MenuWrapper>
+            {showDeletedCards &&
+                <DeletedCardsDialog
+                    cards={deletedCards}
+                    onClose={() => setShowDeletedCards(false)}
+                />
+            }
         </ModalWrapper>
     )
 }

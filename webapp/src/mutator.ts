@@ -183,6 +183,26 @@ class Mutator {
         )
     }
 
+    async undeleteBlock(block: Block, description?: string, afterRedo?: (block: Block) => Promise<void>, beforeUndo?: (block: Block) => Promise<void>) {
+        const actualDescription = description || `restore ${block.type}`
+
+        return undoManager.perform(
+            async () => {
+                const res = await octoClient.undeleteBlock(block.boardId, block.id)
+                const restoredBlock = await res.json() as Block
+                updateAllBoardsAndBlocks([], [restoredBlock])
+                await afterRedo?.(restoredBlock)
+                return restoredBlock
+            },
+            async (restoredBlock: Block) => {
+                await beforeUndo?.(restoredBlock)
+                await octoClient.deleteBlock(restoredBlock.boardId, restoredBlock.id)
+            },
+            actualDescription,
+            this.undoGroupId,
+        )
+    }
+
     async createBoardsAndBlocks(bab: BoardsAndBlocks, description = 'add', afterRedo?: (b: BoardsAndBlocks) => Promise<void>, beforeUndo?: (b: BoardsAndBlocks) => Promise<void>): Promise<BoardsAndBlocks> {
         return undoManager.perform(
             async () => {

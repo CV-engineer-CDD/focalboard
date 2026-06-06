@@ -2,7 +2,21 @@
 
 This fork adds a board-scoped task ID and a plugin-wide global task ID to every
 Boards card so cards can be referenced with short stable values such as `#1`
-inside one board and `G-1700000000001` across boards.
+inside one board and `G-1` across boards.
+
+## Version notes
+
+- `7.11.0-taskid-boardonly-linux-loong64`: board-scoped `#N` only; kept as a
+  fallback package.
+- `7.11.1-taskid-linux-loong64`: added plugin-wide `G-N`, read-only `Global ID`
+  property display, and a manifest version bump for Mattermost upgrades.
+- `7.11.2-taskid-linux-loong64`: fixed timestamp-shaped global IDs such as
+  `G-1780519393936` by initializing from the highest valid existing `G-N`.
+- `7.11.3-taskid-linux-loong64`: soft-deleted cards no longer reserve IDs;
+  deleting the highest active ID lets the next card reuse it, and restore
+  reassigns IDs when needed to avoid active-card conflicts.
+- `7.11.4-taskid-linux-loong64`: added the board header `Deleted cards` dialog
+  so users can restore deleted cards from the UI.
 
 ## Card task ID behavior
 
@@ -68,6 +82,8 @@ still has no `taskId`.
   sequence when that board is migrated.
 - Soft-deleted cards do not reserve their `globalTaskId`. Restoring a deleted
   card reassigns the global ID if the old value conflicts with an active card.
+- The board header menu includes a `Deleted cards` dialog for restoring deleted
+  cards in the current board.
 
 ## linux-loong64 build notes
 
@@ -123,7 +139,7 @@ make bundle
 Verify the final plugin package contains only the `linux-loong64` executable:
 
 ```bash
-tar -tzf mattermost-plugin/dist/focalboard-7.11.3.tar.gz | grep plugin-linux
-tar -xOzf mattermost-plugin/dist/focalboard-7.11.3.tar.gz focalboard/plugin.json
+tar -tzf mattermost-plugin/dist/focalboard-7.11.4.tar.gz | grep plugin-linux
+tar -xOzf mattermost-plugin/dist/focalboard-7.11.4.tar.gz focalboard/plugin.json
 file mattermost-plugin/server/dist/plugin-linux-loong64
 ```
