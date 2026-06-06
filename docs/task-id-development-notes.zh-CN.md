@@ -16,6 +16,37 @@ Mattermost Boards 插件包期间的需求演进、实现调整、问题修复�
 - 只构建 `linux-loong64` 插件。
 - 不破坏 Mattermost 7.10/7.11 Boards 原有使用流程。
 
+## 用户需求与决策摘要
+
+本次开发不是一次性需求，而是在实际部署、导入插件、打开 board、新建/删除/恢复卡片
+过程中逐步暴露问题并迭代。下面按对话中的主要诉求记录：
+
+- 最初诉求：为 Boards 每个任务增加唯一、短小、可读的 ID，方便在代码、提交记录、
+  构建产物和项目记录中引用，避免时间久了代码和 board 卡片对不上。
+- 构建诉求：最终只需要能用于 Mattermost 插件上传的 `linux-loong64` 二进制插件包，
+  并保留能回退的旧版本压缩包。
+- 兼容诉求：旧卡片不能继续显示内部字符串；老数据也要进入数字编号序列，并且迁移
+  过程不能冲突。
+- 全局追踪诉求：单个 board 内编号不够，跨 board 也需要一个整体唯一 ID，方便在
+  代码层面引用和跟踪。
+- 性能诉求：原版没有明显卡顿，引入编号后新建、删除、打开整板不能出现明显额外延迟。
+- 插件升级诉求：上传压缩包导入插件时不能因为 manifest 版本不变导致 Mattermost
+  报“无法升级时重启插件”。
+- 删除恢复诉求：既然后端支持 soft delete 和恢复，UI 中也要能查看已删除卡片并恢复，
+  不应要求用户手写 API 或操作数据库。
+- 永久删除诉求：`Deleted cards` 中还需要二次确认后的永久删除，永久删除后不再出现在
+  已删除列表，也不能再恢复。
+- 显示诉求：外部卡片卡面、表格、画廊、日历、详情标题应显示全局 ID；详情属性区显示
+  board 内 ID，避免跨 board 引用时看错编号。
+- 稳定性诉求：`Deleted cards` 要显示真实标题、真实 ID、真实删除时间；恢复、新建、
+  删除不能出现点一次无响应、再点一次才成功的假象。
+- 编号释放疑问：你提出“永久删除后的 ID 是否释放给新卡使用”。我的建议和最终决策是
+  不释放，原因是本项目的核心价值是长期引用稳定。释放编号会让旧代码注释、commit、
+  构建日志中的编号将来可能指向另一张新卡，破坏唯一引用。最终规则是 soft delete
+  和 permanent delete 都不释放编号，新卡始终从历史最大编号继续递增。
+
+因此，最终版本接受“编号中间会有空洞”的代价，换取跨时间维度的唯一性和可追溯性。
+
 ## 版本变更记录
 
 ### `7.11.0-taskid-boardonly-linux-loong64`
@@ -366,7 +397,7 @@ go test ./api -run TestNonExistent -count=1
   - 增加 `globalTaskId` 类型
 
 - `webapp/src/components/cardDetail/cardDetailProperties.tsx`
-  - 卡片详情属性区显示只读 `Global ID`
+  - 卡片详情属性区显示只读 `Board ID`
 
 - `webapp/src/store/cards.ts`
   - limited card 状态保留 `globalTaskId`
@@ -378,7 +409,7 @@ go test ./api -run TestNonExistent -count=1
   - 统一外显全局 ID 和详情 board ID 的格式化
 
 - `webapp/src/styles/main.scss`
-  - `Global ID` 只读显示样式
+  - ID 只读显示样式
 
 - `webapp/src/mutator.ts`
   - 增加 `undeleteBlock`，调用恢复 API 并更新前端状态
@@ -479,21 +510,23 @@ go test ./api -run TestNonExistent -count=1
 
 删除/恢复卡片：
 
-- 删除卡片后，该卡片不再占用 board 内 `#N` 和全局 `G-N`
-- 如果删除的是当前最高编号，下一张新卡片会复用这个最高编号
-- 如果被删除的卡片后来恢复，而原编号已被其他活动卡片复用，恢复卡片会重新分配新编号
-- UI 在 board 顶部三点菜单中增加 `Deleted cards` 入口，列出当前 board 已删除卡片并支持恢复
+- 普通删除是 soft delete，卡片进入 `Deleted cards`，编号继续被历史占用
+- 永久删除只移除卡片和恢复历史，不释放 board 内 `#N` 或全局 `G-N`
+- 如果删除的是当前最高编号，下一张新卡片仍从历史最大编号继续递增，不复用这个最高编号
+- 恢复已删除卡片时，通常保留原编号；如果遇到历史异常或冲突，服务端会重新分配不冲突的新编号
+- UI 在 board 顶部三点菜单中增加 `Deleted cards` 入口，列出当前 board 已删除卡片并支持恢复或二次确认后永久删除
 
 打开旧 board：
 
 - 首次加载时迁移旧 `taskId`
 - 首次加载当前 board 时迁移旧 `globalTaskId`
+- 迁移最大值会同时参考未删除卡片和 deleted card history，避免重启或永久删除后遗忘历史最高号
 - 迁移后按 board 使用进程内缓存，避免重复扫描
 
 显示：
 
-- board 内 ID 显示在卡片标题附近
-- 全局 ID 显示在卡片详情的属性区，名称为 `Global ID`
+- 看板、表格、画廊、日历和卡片详情标题外侧显示全局 ID，格式从 `G-30392` 显示为 `#30392`
+- 卡片详情属性区显示 `Board ID`，内容是 board 内数字编号，例如 `471`
 
 ## 验证命令
 
@@ -533,15 +566,15 @@ make bundle
 包校验：
 
 ```bash
-tar -xOzf mattermost-plugin/dist/focalboard-7.11.5.tar.gz focalboard/plugin.json
-tar -tzf mattermost-plugin/dist/focalboard-7.11.5.tar.gz | grep plugin-linux
+tar -xOzf mattermost-plugin/dist/focalboard-7.11.6.tar.gz focalboard/plugin.json
+tar -tzf mattermost-plugin/dist/focalboard-7.11.6.tar.gz | grep plugin-linux
 file mattermost-plugin/server/dist/plugin-linux-loong64
 ```
 
 ## 已知边界
 
-- `taskId` 的严格唯一范围是单 board 的未删除卡片。
-- `taskId` 的发号计数器持久化到 `system_settings`，永久删除后也不会主动复用旧编号。
+- `taskId` 的严格唯一范围是单 board 的卡片生命周期编号；软删除和永久删除都不主动复用旧编号。
+- `taskId` 的发号计数器持久化到 `system_settings`，永久删除后也不会因历史记录消失而回退。
 - `globalTaskId` 的严格唯一范围是单插件进程串行写入场景下的卡片生命周期编号。
 - 软删除和永久删除都不释放编号；编号空洞是为了保证代码引用和历史记录长期稳定。
 - 如果同一个数据库有多个插件进程同时写入，严格跨进程唯一需要数据库事务序列或唯一约束。
