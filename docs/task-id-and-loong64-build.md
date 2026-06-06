@@ -17,6 +17,10 @@ inside one board and `G-1` across boards.
   reassigns IDs when needed to avoid active-card conflicts.
 - `7.11.4-taskid-linux-loong64`: added the board header `Deleted cards` dialog
   so users can restore deleted cards from the UI.
+- `7.11.5-taskid-linux-loong64`: added confirmed permanent deletion from the
+  `Deleted cards` dialog. The purge endpoint only accepts already-deleted cards
+  and removes their active/history records so they no longer appear in the
+  restore list.
 
 ## Card task ID behavior
 
@@ -139,7 +143,7 @@ make bundle
 Verify the final plugin package contains only the `linux-loong64` executable:
 
 ```bash
-tar -tzf mattermost-plugin/dist/focalboard-7.11.4.tar.gz | grep plugin-linux
-tar -xOzf mattermost-plugin/dist/focalboard-7.11.4.tar.gz focalboard/plugin.json
+tar -tzf mattermost-plugin/dist/focalboard-7.11.5.tar.gz | grep plugin-linux
+tar -xOzf mattermost-plugin/dist/focalboard-7.11.5.tar.gz focalboard/plugin.json
 file mattermost-plugin/server/dist/plugin-linux-loong64
 ```

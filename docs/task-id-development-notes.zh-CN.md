@@ -61,6 +61,16 @@ Mattermost Boards 插件包期间的需求演进、实现调整、问题修复�
 - 验证：`webapp npm run check`、主 webapp `npm run pack`、插件 webapp `npm run build` 均通过。
 - 已知：当前 loong64 环境无法运行 Jest，原因是 `@swc/core` 没有 loong64 Linux native binding；已同步更新相关 snapshot 文本。
 
+### `7.11.5-taskid-linux-loong64`
+
+- 功能：`Deleted cards` 弹窗中新增 `Permanently delete` 操作。
+- 功能：用户点击永久删除后必须二次确认，确认后该卡片从已删除列表移除，不能再通过 `Deleted cards` 恢复。
+- 实现：新增 `DELETE /api/v2/boards/{boardID}/blocks/{blockID}/purge` 接口，只允许对已经 soft delete 的 block 执行永久删除。
+- 实现：存储层递归收集该卡片在 `blocks_history` 中的子块，随后从 `blocks` 和 `blocks_history` 删除对应记录。
+- 防护：服务端拒绝对未删除卡片执行永久删除，避免把普通删除流程误变成物理删除。
+- 验证：`webapp npm run check` 通过；`go test ./app -run '^(TestDeleteBlock|TestUndeleteBlock|TestPermanentlyDeleteBlock)$' -count=1` 通过；`go test ./api -run TestNonExistent -count=1` 通过。
+- 已知：`go test ./services/store/sqlstore` 在当前 loong64 环境仍受 `modernc.org/libc` build constraints 限制，无法作为本地验证项。
+
 ## 需求演进
 
 ### 第一阶段：board 内唯一 ID
@@ -204,6 +214,60 @@ property template，避免污染用户自定义列配置。
 - 最终校验确认 `focalboard-7.11.4.tar.gz` 中没有 `webapp/dist/webapp`、
   `webapp/dist/mattermost-plugin` 或 `*.test.js` 编译产物。
 
+### 第七阶段：已删除卡片永久删除
+
+恢复功能可用后，继续出现一个实际管理需求：部分已删除卡片不希望长期留在
+`Deleted cards` 弹窗中，也不希望再能被恢复。因此增加永久删除能力。
+
+设计边界：
+
+- 普通删除仍然是 soft delete，保留恢复能力。
+- 永久删除只出现在 `Deleted cards` 弹窗中。
+- 永久删除前必须二次确认。
+- 服务端只允许永久删除最新历史状态已经是 deleted 的 block。
+- 永久删除后，该卡片及其历史子块从 `blocks_history` 删除，因此不会再进入恢复列表。
+
+本次修改：
+
+- `server/api/blocks.go`
+  - 新增 `DELETE /boards/{boardID}/blocks/{blockID}/purge`。
+  - 保持与普通删除相同的 `PermissionManageBoardCards` 权限。
+  - 校验 block 历史记录属于当前 board。
+- `server/app/blocks.go`
+  - 新增 `PermanentlyDeleteBlock`。
+  - 拒绝未删除 block，返回 bad request。
+  - 删除成功后广播 block delete，让已打开客户端同步移除。
+- `server/services/store/sqlstore/blocks.go`
+  - 新增递归收集历史子块 ID 的逻辑。
+  - 同时清理 `blocks` 和 `blocks_history`，覆盖极端情况下仍残留在 active 表中的记录。
+- `webapp/src/components/viewHeader/deletedCardsDialog.tsx`
+  - 每张已删除卡片增加 `Permanently delete` 按钮。
+  - 点击后弹出确认框，确认后调用 mutator 永久删除。
+  - 成功后从本地 `deletedCards` 状态移除。
+- `webapp/src/store/cards.ts`
+  - 新增 `removeDeletedCard` reducer。
+- `webapp/src/octoClient.ts`、`webapp/src/mutator.ts`
+  - 新增永久删除 API 调用封装。
+
+验证情况：
+
+```bash
+cd webapp
+npm run check
+
+cd ../server
+go test ./app -run '^(TestDeleteBlock|TestUndeleteBlock|TestPermanentlyDeleteBlock)$' -count=1
+go test ./api -run TestNonExistent -count=1
+```
+
+结果：
+
+- 前端 lint/stylelint 通过。
+- App 层删除、恢复、永久删除测试通过。
+- API 包编译通过。
+- `sqlstore` 包在 loong64 上仍因 `modernc.org/libc` 对 loong64 缺少对应 build
+  constraints 文件而无法本地运行，这属于此前已存在的 loong64 测试环境限制。
+
 ## 主要源码修改
 
 服务端模型：
@@ -246,18 +310,24 @@ property template，避免污染用户自定义列配置。
 - `webapp/src/store/cards.ts`
   - limited card 状态保留 `globalTaskId`
   - 增加 `deletedCards`，保存已删除卡片供恢复弹窗使用
+  - 增加 `removeDeletedCard`，永久删除成功后从恢复列表移除
 
 - `webapp/src/styles/main.scss`
   - `Global ID` 只读显示样式
 
 - `webapp/src/mutator.ts`
   - 增加 `undeleteBlock`，调用恢复 API 并更新前端状态
+  - 增加 `permanentlyDeleteBlock`，调用永久删除 API 并更新前端状态
+
+- `webapp/src/octoClient.ts`
+  - 增加 `/purge` 永久删除接口调用
 
 - `webapp/src/components/viewHeader/viewHeaderActionsMenu.tsx`
   - board 顶部三点菜单增加 `Deleted cards ({count})`
 
 - `webapp/src/components/viewHeader/deletedCardsDialog.tsx`
   - 已删除卡片列表与恢复按钮
+  - 增加永久删除按钮和二次确认
 
 - `webapp/src/components/viewHeader/deletedCardsDialog.scss`
   - 已删除卡片弹窗样式
@@ -397,8 +467,8 @@ make bundle
 包校验：
 
 ```bash
-tar -xOzf mattermost-plugin/dist/focalboard-7.11.4.tar.gz focalboard/plugin.json
-tar -tzf mattermost-plugin/dist/focalboard-7.11.4.tar.gz | grep plugin-linux
+tar -xOzf mattermost-plugin/dist/focalboard-7.11.5.tar.gz focalboard/plugin.json
+tar -tzf mattermost-plugin/dist/focalboard-7.11.5.tar.gz | grep plugin-linux
 file mattermost-plugin/server/dist/plugin-linux-loong64
 ```
 
@@ -418,6 +488,6 @@ file mattermost-plugin/server/dist/plugin-linux-loong64
 最终插件包生成在工作区根目录：
 
 ```text
-focalboard-7.11.4-taskid-linux-loong64.tar.gz
-focalboard-7.11.4-taskid-linux-loong64.tar.gz.zst
+focalboard-7.11.5-taskid-linux-loong64.tar.gz
+focalboard-7.11.5-taskid-linux-loong64.tar.gz.zst
 ```
