@@ -585,9 +585,17 @@ file mattermost-plugin/server/dist/plugin-linux-loong64
 
 ## 产物
 
-最终插件包生成在工作区根目录：
+值得存档的插件包已放入仓库内 `release-archives/`，并随 git 提交保存。外层目录中的
+`.zst` 副本已删除，只保留 Mattermost 可直接上传的 `.tar.gz` 包。
 
-```text
-focalboard-7.11.6-taskid-linux-loong64.tar.gz
-focalboard-7.11.6-taskid-linux-loong64.tar.gz.zst
-```
+| 包位置 | 功能与用途 |
+| --- | --- |
+| `release-archives/focalboard-7.11.0-original-linux-loong64.tar.gz` | 官方 `v7.11.0` 原始行为，只做 loong64 构建/打包适配；用于测试回退到原版 Boards。 |
+| `release-archives/focalboard-7.11.0-taskid-boardonly-linux-loong64.tar.gz` | 只包含 board 内 `#N` 的可用回退版本。 |
+| `release-archives/focalboard-7.11.0-taskid-linux-loong64.tar.gz` | 早期 board/global ID 构建，后续问题尚未全部修复。 |
+| `release-archives/focalboard-7.11.1-taskid-linux-loong64.tar.gz` | 增加 manifest 版本号和 `Global ID` 属性显示。 |
+| `release-archives/focalboard-7.11.2-taskid-linux-loong64.tar.gz` | 修复时间戳形态全局 ID，例如 `G-1780519393936`。 |
+| `release-archives/focalboard-7.11.3-taskid-linux-loong64.tar.gz` | 删除最高编号后可复用编号；保留作历史对比，不建议用于长期代码引用。 |
+| `release-archives/focalboard-7.11.4-taskid-linux-loong64.tar.gz` | 增加 `Deleted cards` 恢复弹窗。 |
+| `release-archives/focalboard-7.11.5-taskid-linux-loong64.tar.gz` | 增加 `Deleted cards` 中的永久删除。 |
+| `release-archives/focalboard-7.11.6-taskid-linux-loong64.tar.gz` | 当前推荐版本：外部显示全局 ID，详情显示 Board ID，修复 Deleted cards 显示/操作问题，软删除和永久删除都不释放编号。 |

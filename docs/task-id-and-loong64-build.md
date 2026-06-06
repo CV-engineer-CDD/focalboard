@@ -159,3 +159,19 @@ tar -tzf mattermost-plugin/dist/focalboard-7.11.6.tar.gz | grep plugin-linux
 tar -xOzf mattermost-plugin/dist/focalboard-7.11.6.tar.gz focalboard/plugin.json
 file mattermost-plugin/server/dist/plugin-linux-loong64
 ```
+
+## Archived packages
+
+Rollback and comparison packages are committed under `release-archives/`.
+
+| Package path | Feature level |
+| --- | --- |
+| `release-archives/focalboard-7.11.0-original-linux-loong64.tar.gz` | Upstream `v7.11.0` behavior with only linux-loong64 build/package adaptation. |
+| `release-archives/focalboard-7.11.0-taskid-boardonly-linux-loong64.tar.gz` | Board-scoped `#N` only. |
+| `release-archives/focalboard-7.11.0-taskid-linux-loong64.tar.gz` | Early board/global ID build. |
+| `release-archives/focalboard-7.11.1-taskid-linux-loong64.tar.gz` | Manifest version bump and Global ID property display. |
+| `release-archives/focalboard-7.11.2-taskid-linux-loong64.tar.gz` | Fixed timestamp-shaped global IDs. |
+| `release-archives/focalboard-7.11.3-taskid-linux-loong64.tar.gz` | Deleted highest IDs could be reused; historical archive. |
+| `release-archives/focalboard-7.11.4-taskid-linux-loong64.tar.gz` | Deleted cards restore dialog. |
+| `release-archives/focalboard-7.11.5-taskid-linux-loong64.tar.gz` | Permanent delete from Deleted cards. |
+| `release-archives/focalboard-7.11.6-taskid-linux-loong64.tar.gz` | Current preferred build; deletes do not release IDs. |
