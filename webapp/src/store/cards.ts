@@ -94,6 +94,12 @@ const cardsSlice = createSlice({
             state.deletedCards = state.deletedCards || {}
             delete state.deletedCards[action.payload.id]
         },
+        removeDeletedCard: (state, action: PayloadAction<string>) => {
+            state.deletedCards = state.deletedCards || {}
+            delete state.deletedCards[action.payload]
+            delete state.cards[action.payload]
+            delete state.templates[action.payload]
+        },
         showCardHiddenWarning: (state, action: PayloadAction<boolean>) => {
             state.cardHiddenWarning = action.payload
         },
@@ -157,7 +163,7 @@ const cardsSlice = createSlice({
     },
 })
 
-export const {updateCards, addCard, addTemplate, setCurrent, setLimitTimestamp, showCardHiddenWarning} = cardsSlice.actions
+export const {updateCards, addCard, addTemplate, removeDeletedCard, setCurrent, setLimitTimestamp, showCardHiddenWarning} = cardsSlice.actions
 export const {reducer} = cardsSlice
 
 export const getCards = (state: RootState): {[key: string]: Card} => state.cards.cards

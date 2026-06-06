@@ -142,4 +142,28 @@ describe('components/viewHeader/viewHeaderActionsMenu', () => {
 
         expect(mockedMutator.undeleteBlock).toBeCalledWith(deletedCard, 'restore card')
     })
+
+    test('opens deleted cards dialog and permanently deletes a card after confirmation', async () => {
+        mockedMutator.permanentlyDeleteBlock.mockResolvedValue()
+        render(
+            wrapIntl(
+                <ReduxProvider store={store}>
+                    <ViewHeaderActionsMenu
+                        board={board}
+                        activeView={activeView}
+                        cards={[card]}
+                    />
+                </ReduxProvider>,
+            ),
+        )
+
+        userEvent.click(screen.getByRole('button', {name: 'View header menu'}))
+        userEvent.click(screen.getByRole('button', {name: 'Deleted cards (1)'}))
+        userEvent.click(screen.getAllByRole('button', {name: 'Permanently delete'})[0])
+        expect(screen.getByTitle('Confirmation Dialog Box')).toBeInTheDocument()
+
+        userEvent.click(screen.getAllByRole('button', {name: 'Permanently delete'})[1])
+
+        expect(mockedMutator.permanentlyDeleteBlock).toBeCalledWith(deletedCard)
+    })
 })

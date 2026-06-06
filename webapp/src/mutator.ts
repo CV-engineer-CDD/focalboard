@@ -26,7 +26,7 @@ import {UserConfigPatch, UserPreference} from './user'
 import store from './store'
 import {updateBoards} from './store/boards'
 import {updateViews} from './store/views'
-import {updateCards} from './store/cards'
+import {removeDeletedCard, updateCards} from './store/cards'
 import {updateAttachments} from './store/attachments'
 import {updateComments} from './store/comments'
 import {updateContents} from './store/contents'
@@ -201,6 +201,11 @@ class Mutator {
             actualDescription,
             this.undoGroupId,
         )
+    }
+
+    async permanentlyDeleteBlock(block: Block): Promise<void> {
+        await octoClient.permanentlyDeleteBlock(block.boardId, block.id)
+        store.dispatch(removeDeletedCard(block.id))
     }
 
     async createBoardsAndBlocks(bab: BoardsAndBlocks, description = 'add', afterRedo?: (b: BoardsAndBlocks) => Promise<void>, beforeUndo?: (b: BoardsAndBlocks) => Promise<void>): Promise<BoardsAndBlocks> {

@@ -288,6 +288,53 @@ func TestUndeleteBlock(t *testing.T) {
 	})
 }
 
+func TestPermanentlyDeleteBlock(t *testing.T) {
+	th, tearDown := SetupTestHelper(t)
+	defer tearDown()
+
+	t.Run("success scenario", func(t *testing.T) {
+		boardID := testBoardID
+		board := &model.Board{ID: boardID}
+		block := &model.Block{
+			ID:       "deleted-card-id",
+			BoardID:  board.ID,
+			Type:     model.TypeCard,
+			DeleteAt: 1680000000000,
+		}
+
+		th.Store.EXPECT().GetBlockHistory(
+			gomock.Eq("deleted-card-id"),
+			gomock.Eq(model.QueryBlockHistoryOptions{Limit: 1, Descending: true}),
+		).Return([]*model.Block{block}, nil)
+		th.Store.EXPECT().GetBoard(boardID).Return(board, nil)
+		th.Store.EXPECT().PermanentlyDeleteBlock(gomock.Eq("deleted-card-id"), gomock.Eq("user-id-1")).Return(nil)
+		th.Store.EXPECT().GetMembersForBoard(boardID).Return([]*model.BoardMember{}, nil)
+
+		deletedBlock, err := th.App.PermanentlyDeleteBlock("deleted-card-id", "user-id-1")
+
+		require.NoError(t, err)
+		require.Equal(t, block, deletedBlock)
+	})
+
+	t.Run("rejects active block", func(t *testing.T) {
+		block := &model.Block{
+			ID:      "active-card-id",
+			BoardID: testBoardID,
+			Type:    model.TypeCard,
+		}
+
+		th.Store.EXPECT().GetBlockHistory(
+			gomock.Eq("active-card-id"),
+			gomock.Eq(model.QueryBlockHistoryOptions{Limit: 1, Descending: true}),
+		).Return([]*model.Block{block}, nil)
+
+		_, err := th.App.PermanentlyDeleteBlock("active-card-id", "user-id-1")
+
+		require.Error(t, err)
+		require.True(t, model.IsErrBadRequest(err))
+	})
+}
+
 func TestIsWithinViewsLimit(t *testing.T) {
 	t.Skipf("The Cloud Limits feature has been disabled")
 

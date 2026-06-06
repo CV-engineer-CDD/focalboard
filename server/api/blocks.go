@@ -22,6 +22,7 @@ func (a *API) registerBlocksRoutes(r *mux.Router) {
 	r.HandleFunc("/boards/{boardID}/blocks/{blockID}", a.sessionRequired(a.handleDeleteBlock)).Methods("DELETE")
 	r.HandleFunc("/boards/{boardID}/blocks/{blockID}", a.sessionRequired(a.handlePatchBlock)).Methods("PATCH")
 	r.HandleFunc("/boards/{boardID}/blocks/{blockID}/undelete", a.sessionRequired(a.handleUndeleteBlock)).Methods("POST")
+	r.HandleFunc("/boards/{boardID}/blocks/{blockID}/purge", a.sessionRequired(a.handlePermanentlyDeleteBlock)).Methods("DELETE")
 	r.HandleFunc("/boards/{boardID}/blocks/{blockID}/duplicate", a.sessionRequired(a.handleDuplicateBlock)).Methods("POST")
 }
 
@@ -404,6 +405,45 @@ func (a *API) handleDeleteBlock(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.logger.Debug("DELETE Block", mlog.String("boardID", boardID), mlog.String("blockID", blockID))
+	jsonStringResponse(w, http.StatusOK, "{}")
+
+	auditRec.Success()
+}
+
+func (a *API) handlePermanentlyDeleteBlock(w http.ResponseWriter, r *http.Request) {
+	userID := getUserID(r)
+	vars := mux.Vars(r)
+	boardID := vars["boardID"]
+	blockID := vars["blockID"]
+
+	if !a.permissions.HasPermissionToBoard(userID, boardID, model.PermissionManageBoardCards) {
+		a.errorResponse(w, r, model.NewErrPermission("access denied to make board changes"))
+		return
+	}
+
+	block, err := a.app.GetLastBlockHistoryEntry(blockID)
+	if err != nil {
+		a.errorResponse(w, r, err)
+		return
+	}
+	if block == nil || block.BoardID != boardID {
+		message := fmt.Sprintf("block ID=%s on BoardID=%s", blockID, boardID)
+		a.errorResponse(w, r, model.NewErrNotFound(message))
+		return
+	}
+
+	auditRec := a.makeAuditRecord(r, "permanentlyDeleteBlock", audit.Fail)
+	defer a.audit.LogRecord(audit.LevelModify, auditRec)
+	auditRec.AddMeta("boardID", boardID)
+	auditRec.AddMeta("blockID", blockID)
+
+	_, err = a.app.PermanentlyDeleteBlock(blockID, userID)
+	if err != nil {
+		a.errorResponse(w, r, err)
+		return
+	}
+
+	a.logger.Debug("PERMANENTLY DELETE Block", mlog.String("boardID", boardID), mlog.String("blockID", blockID))
 	jsonStringResponse(w, http.StatusOK, "{}")
 
 	auditRec.Success()

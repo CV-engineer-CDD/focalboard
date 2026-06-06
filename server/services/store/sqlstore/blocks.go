@@ -1016,6 +1016,47 @@ func (s *SQLStore) deleteBlockChildren(db sq.BaseRunner, boardID string, parentI
 	return nil
 }
 
+func (s *SQLStore) permanentlyDeleteBlock(db sq.BaseRunner, blockID string, _ string) error {
+	ids, err := s.collectBlockHistoryDescendantIDs(db, blockID)
+	if err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+
+	if _, err = s.getQueryBuilder(db).
+		Delete(s.tablePrefix + "blocks").
+		Where(sq.Eq{"id": ids}).
+		Exec(); err != nil {
+		return err
+	}
+
+	_, err = s.getQueryBuilder(db).
+		Delete(s.tablePrefix + "blocks_history").
+		Where(sq.Eq{"id": ids}).
+		Exec()
+	return err
+}
+
+func (s *SQLStore) collectBlockHistoryDescendantIDs(db sq.BaseRunner, blockID string) ([]string, error) {
+	ids := []string{blockID}
+	children, _, err := s.getBlockHistoryNewestChildren(db, blockID, model.QueryBlockHistoryChildOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	for _, child := range children {
+		childIDs, err := s.collectBlockHistoryDescendantIDs(db, child.ID)
+		if err != nil {
+			return nil, err
+		}
+		ids = append(ids, childIDs...)
+	}
+
+	return ids, nil
+}
+
 func (s *SQLStore) undeleteBlockChildren(db sq.BaseRunner, boardID string, parentID string, modifiedBy string) error {
 	if boardID == "" {
 		return ErrEmptyBoardID{}

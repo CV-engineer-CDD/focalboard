@@ -167,6 +167,29 @@ func (s *SQLStore) DeleteBlock(blockID string, modifiedBy string) error {
 
 }
 
+func (s *SQLStore) PermanentlyDeleteBlock(blockID string, modifiedBy string) error {
+	if s.dbType == model.SqliteDBType {
+		return s.permanentlyDeleteBlock(s.db, blockID, modifiedBy)
+	}
+	tx, txErr := s.db.BeginTx(context.Background(), nil)
+	if txErr != nil {
+		return txErr
+	}
+	err := s.permanentlyDeleteBlock(tx, blockID, modifiedBy)
+	if err != nil {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil {
+			s.logger.Error("transaction rollback error", mlog.Err(rollbackErr), mlog.String("methodName", "PermanentlyDeleteBlock"))
+		}
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func (s *SQLStore) DeleteBlockRecord(blockID string, modifiedBy string) error {
 	return s.deleteBlockRecord(s.db, blockID, modifiedBy)
 

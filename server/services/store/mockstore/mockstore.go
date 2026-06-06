@@ -210,6 +210,20 @@ func (mr *MockStoreMockRecorder) DeleteBlock(arg0, arg1 interface{}) *gomock.Cal
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteBlock", reflect.TypeOf((*MockStore)(nil).DeleteBlock), arg0, arg1)
 }
 
+// PermanentlyDeleteBlock mocks base method.
+func (m *MockStore) PermanentlyDeleteBlock(arg0, arg1 string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PermanentlyDeleteBlock", arg0, arg1)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// PermanentlyDeleteBlock indicates an expected call of PermanentlyDeleteBlock.
+func (mr *MockStoreMockRecorder) PermanentlyDeleteBlock(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PermanentlyDeleteBlock", reflect.TypeOf((*MockStore)(nil).PermanentlyDeleteBlock), arg0, arg1)
+}
+
 // DeleteBlockRecord mocks base method.
 func (m *MockStore) DeleteBlockRecord(arg0, arg1 string) error {
 	m.ctrl.T.Helper()

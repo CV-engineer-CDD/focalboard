@@ -453,6 +453,37 @@ func (a *App) DeleteBlockAndNotify(blockID string, modifiedBy string, disableNot
 	return nil
 }
 
+func (a *App) PermanentlyDeleteBlock(blockID string, modifiedBy string) (*model.Block, error) {
+	block, err := a.GetLastBlockHistoryEntry(blockID)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, model.NewErrNotFound("block history BlockID=" + blockID)
+	}
+	if block.DeleteAt == 0 {
+		return nil, model.NewErrBadRequest("only deleted blocks can be permanently deleted")
+	}
+
+	board, err := a.store.GetBoard(block.BoardID)
+	if err != nil {
+		return nil, err
+	}
+
+	err = a.store.PermanentlyDeleteBlock(blockID, modifiedBy)
+	if err != nil {
+		return nil, err
+	}
+
+	a.blockChangeNotifier.Enqueue(func() error {
+		a.wsAdapter.BroadcastBlockDelete(board.TeamID, blockID, block.BoardID)
+		a.metrics.IncrementBlocksDeleted(1)
+		return nil
+	})
+
+	return block, nil
+}
+
 func (a *App) GetLastBlockHistoryEntry(blockID string) (*model.Block, error) {
 	blocks, err := a.store.GetBlockHistory(blockID, model.QueryBlockHistoryOptions{Limit: 1, Descending: true})
 	if err != nil {

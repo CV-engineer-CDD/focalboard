@@ -387,6 +387,14 @@ class OctoClient {
         })
     }
 
+    async permanentlyDeleteBlock(boardId: string, blockId: string): Promise<Response> {
+        Utils.log(`permanentlyDeleteBlock: ${blockId}`)
+        return fetch(`${this.getBaseURL()}/api/v2/boards/${encodeURIComponent(boardId)}/blocks/${encodeURIComponent(blockId)}/purge`, {
+            method: 'DELETE',
+            headers: this.headers(),
+        })
+    }
+
     async undeleteBoard(boardId: string): Promise<Response> {
         Utils.log(`undeleteBoard: ${boardId}`)
         return fetch(`${this.getBaseURL()}/api/v2/boards/${boardId}/undelete`, {

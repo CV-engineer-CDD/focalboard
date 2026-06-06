@@ -26,6 +26,8 @@ type Store interface {
 	// @withTransaction
 	DeleteBlock(blockID string, modifiedBy string) error
 	// @withTransaction
+	PermanentlyDeleteBlock(blockID string, modifiedBy string) error
+	// @withTransaction
 	InsertBlocks(blocks []*model.Block, userID string) error
 	// @withTransaction
 	UndeleteBlock(blockID string, modifiedBy string) error

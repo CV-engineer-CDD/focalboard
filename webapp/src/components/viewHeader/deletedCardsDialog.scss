@@ -40,6 +40,12 @@
     }
 }
 
+.DeletedCardsDialog__actions {
+    display: flex;
+    flex-shrink: 0;
+    gap: 8px;
+}
+
 .DeletedCardsDialog__main {
     min-width: 0;
 }
