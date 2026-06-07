@@ -173,93 +173,6 @@ func (a *App) nextCardGlobalTaskIDLocked() (string, error) {
 	return fmt.Sprintf("%s%d", cardGlobalTaskIDPrefix, a.cardGlobalTaskIDMax), nil
 }
 
-func (a *App) refreshCardIDCountersAfterDelete(block *model.Block) error {
-	if block == nil || block.Type != model.TypeCard {
-		return nil
-	}
-
-	unlock := a.lockCardTaskIDs(block.BoardID)
-	defer unlock()
-	a.cardGlobalTaskIDMux.Lock()
-	defer a.cardGlobalTaskIDMux.Unlock()
-
-	if block.Fields != nil {
-		taskID, _ := block.Fields["taskId"].(string)
-		if err := a.refreshCardTaskIDCounterAfterDeleteLocked(block.BoardID, taskID); err != nil {
-			return err
-		}
-
-		globalTaskID, _ := block.Fields["globalTaskId"].(string)
-		if err := a.refreshCardGlobalTaskIDCounterAfterDeleteLocked(globalTaskID); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (a *App) refreshCardTaskIDCounterAfterDeleteLocked(boardID string, taskID string) error {
-	deletedNumber, ok := cardTaskIDNumber(taskID)
-	if !ok {
-		return nil
-	}
-
-	a.cardTaskIDStateMux.Lock()
-	currentMax, loaded := a.cardTaskIDMaxByBoard[boardID]
-	a.cardTaskIDStateMux.Unlock()
-	if !loaded || deletedNumber < currentMax {
-		return nil
-	}
-
-	maxNumber, err := a.loadCardTaskIDMaxForBoardLocked(boardID)
-	if err != nil {
-		return err
-	}
-
-	a.cardTaskIDStateMux.Lock()
-	a.cardTaskIDMaxByBoard[boardID] = maxNumber
-	a.cardTaskIDBackfilledBoards[boardID] = true
-	a.cardTaskIDStateMux.Unlock()
-	if err := a.store.SetSystemSetting(cardTaskIDCounterKey(boardID), strconv.Itoa(maxNumber)); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (a *App) refreshCardGlobalTaskIDCounterAfterDeleteLocked(globalTaskID string) error {
-	deletedNumber, ok := cardGlobalTaskIDNumber(globalTaskID)
-	if !ok {
-		return nil
-	}
-
-	currentMax := a.cardGlobalTaskIDMax
-	if !a.cardGlobalTaskIDCounterLoaded {
-		counterValue, err := a.store.GetSystemSetting(cardGlobalTaskIDCounterKey)
-		if err != nil {
-			return err
-		}
-		if counterValue == "" {
-			return nil
-		}
-		counter, cErr := strconv.Atoi(counterValue)
-		if cErr != nil {
-			return cErr
-		}
-		currentMax = counter
-	}
-	if !isTimestampCardGlobalTaskIDNumber(currentMax) && deletedNumber < currentMax {
-		return nil
-	}
-
-	maxNumber, err := a.loadCardGlobalTaskIDMaxLocked()
-	if err != nil {
-		return err
-	}
-	a.cardGlobalTaskIDMax = maxNumber
-	a.cardGlobalTaskIDCounterLoaded = true
-	return nil
-}
-
 func (a *App) loadCardTaskIDMaxForBoardLocked(boardID string) (int, error) {
 	opts := model.QueryBlocksOptions{
 		BoardID:   boardID,
@@ -305,10 +218,15 @@ func (a *App) reconcileUndeletedCardIDs(block *model.Block, modifiedBy string) e
 	}
 
 	updatedFields := make(map[string]interface{})
-	taskMax, usedTaskIDs, err := a.activeCardTaskIDUsageForBoardLocked(block.BoardID, block.ID)
+	activeTaskMax, usedTaskIDs, err := a.activeCardTaskIDUsageForBoardLocked(block.BoardID, block.ID)
 	if err != nil {
 		return err
 	}
+	reservedTaskMax, err := a.reservedCardTaskIDMaxForBoardLocked(block.BoardID)
+	if err != nil {
+		return err
+	}
+	taskMax := maxInt(activeTaskMax, reservedTaskMax)
 	taskID, _ := block.Fields["taskId"].(string)
 	taskNumber, taskOK := cardTaskIDNumber(taskID)
 	_, taskConflict := usedTaskIDs[taskNumber]
@@ -317,14 +235,19 @@ func (a *App) reconcileUndeletedCardIDs(block *model.Block, modifiedBy string) e
 		taskID = fmt.Sprintf("%s%d", cardTaskIDPrefix, taskMax)
 		block.Fields["taskId"] = taskID
 		updatedFields["taskId"] = taskID
-	} else if taskNumber > taskMax {
-		taskMax = taskNumber
+	} else {
+		taskMax = maxInt(taskMax, taskNumber)
 	}
 
-	globalMax, usedGlobalTaskIDs, err := a.activeCardGlobalTaskIDUsageLocked(block.ID)
+	activeGlobalMax, usedGlobalTaskIDs, err := a.activeCardGlobalTaskIDUsageLocked(block.ID)
 	if err != nil {
 		return err
 	}
+	reservedGlobalMax, err := a.reservedCardGlobalTaskIDMaxLocked()
+	if err != nil {
+		return err
+	}
+	globalMax := maxInt(activeGlobalMax, reservedGlobalMax)
 	globalTaskID, _ := block.Fields["globalTaskId"].(string)
 	globalNumber, globalOK := cardGlobalTaskIDNumber(globalTaskID)
 	_, globalConflict := usedGlobalTaskIDs[globalNumber]
@@ -336,9 +259,7 @@ func (a *App) reconcileUndeletedCardIDs(block *model.Block, modifiedBy string) e
 		setCardGlobalTaskIDProperty(block, globalTaskID)
 		updatedFields["properties"] = block.Fields["properties"]
 	} else {
-		if globalNumber > globalMax {
-			globalMax = globalNumber
-		}
+		globalMax = maxInt(globalMax, globalNumber)
 		if setCardGlobalTaskIDProperty(block, globalTaskID) {
 			updatedFields["properties"] = block.Fields["properties"]
 		}
@@ -350,6 +271,9 @@ func (a *App) reconcileUndeletedCardIDs(block *model.Block, modifiedBy string) e
 	a.cardTaskIDStateMux.Unlock()
 	a.cardGlobalTaskIDMax = globalMax
 	a.cardGlobalTaskIDCounterLoaded = true
+	if err := a.store.SetSystemSetting(cardTaskIDCounterKey(block.BoardID), strconv.Itoa(taskMax)); err != nil {
+		return err
+	}
 	if err := a.store.SetSystemSetting(cardGlobalTaskIDCounterKey, strconv.Itoa(globalMax)); err != nil {
 		return err
 	}
@@ -372,12 +296,13 @@ func (a *App) reserveCardIDCountersBeforePurge(block *model.Block) error {
 
 	taskID, _ := block.Fields["taskId"].(string)
 	if taskNumber, ok := cardTaskIDNumber(taskID); ok {
-		a.cardTaskIDStateMux.Lock()
-		currentMax := a.cardTaskIDMaxByBoard[block.BoardID]
-		if taskNumber > currentMax {
-			a.cardTaskIDMaxByBoard[block.BoardID] = taskNumber
-			currentMax = taskNumber
+		currentMax, err := a.reservedCardTaskIDMaxForBoardLocked(block.BoardID)
+		if err != nil {
+			return err
 		}
+		currentMax = maxInt(currentMax, taskNumber)
+		a.cardTaskIDStateMux.Lock()
+		a.cardTaskIDMaxByBoard[block.BoardID] = currentMax
 		a.cardTaskIDBackfilledBoards[block.BoardID] = true
 		a.cardTaskIDStateMux.Unlock()
 		if err := a.store.SetSystemSetting(cardTaskIDCounterKey(block.BoardID), strconv.Itoa(currentMax)); err != nil {
@@ -387,29 +312,71 @@ func (a *App) reserveCardIDCountersBeforePurge(block *model.Block) error {
 
 	globalTaskID, _ := block.Fields["globalTaskId"].(string)
 	if globalNumber, ok := cardGlobalTaskIDNumber(globalTaskID); ok {
-		if !a.cardGlobalTaskIDCounterLoaded {
-			counterValue, err := a.store.GetSystemSetting(cardGlobalTaskIDCounterKey)
-			if err != nil {
-				return err
-			}
-			if counterValue != "" {
-				counter, cErr := strconv.Atoi(counterValue)
-				if cErr != nil {
-					return cErr
-				}
-				a.cardGlobalTaskIDMax = counter
-			}
-			a.cardGlobalTaskIDCounterLoaded = true
+		currentMax, err := a.reservedCardGlobalTaskIDMaxLocked()
+		if err != nil {
+			return err
 		}
-		if globalNumber > a.cardGlobalTaskIDMax {
-			a.cardGlobalTaskIDMax = globalNumber
-			if err := a.store.SetSystemSetting(cardGlobalTaskIDCounterKey, strconv.Itoa(globalNumber)); err != nil {
-				return err
-			}
+		currentMax = maxInt(currentMax, globalNumber)
+		a.cardGlobalTaskIDMax = currentMax
+		a.cardGlobalTaskIDCounterLoaded = true
+		if err := a.store.SetSystemSetting(cardGlobalTaskIDCounterKey, strconv.Itoa(currentMax)); err != nil {
+			return err
 		}
 	}
 
 	return nil
+}
+
+func (a *App) reservedCardTaskIDMaxForBoardLocked(boardID string) (int, error) {
+	maxNumber, err := a.loadCardTaskIDMaxForBoardLocked(boardID)
+	if err != nil {
+		return 0, err
+	}
+
+	counterValue, err := a.store.GetSystemSetting(cardTaskIDCounterKey(boardID))
+	if err != nil {
+		return 0, err
+	}
+	if counterValue != "" {
+		counter, cErr := strconv.Atoi(counterValue)
+		if cErr != nil {
+			return 0, cErr
+		}
+		maxNumber = maxInt(maxNumber, counter)
+	}
+
+	a.cardTaskIDStateMux.Lock()
+	if cachedMax, ok := a.cardTaskIDMaxByBoard[boardID]; ok {
+		maxNumber = maxInt(maxNumber, cachedMax)
+	}
+	a.cardTaskIDStateMux.Unlock()
+
+	return maxNumber, nil
+}
+
+func (a *App) reservedCardGlobalTaskIDMaxLocked() (int, error) {
+	maxNumber, err := a.loadCardGlobalTaskIDMaxLocked()
+	if err != nil {
+		return 0, err
+	}
+
+	if a.cardGlobalTaskIDCounterLoaded {
+		maxNumber = maxInt(maxNumber, a.cardGlobalTaskIDMax)
+	}
+
+	counterValue, err := a.store.GetSystemSetting(cardGlobalTaskIDCounterKey)
+	if err != nil {
+		return 0, err
+	}
+	if counterValue != "" {
+		counter, cErr := strconv.Atoi(counterValue)
+		if cErr != nil {
+			return 0, cErr
+		}
+		maxNumber = maxInt(maxNumber, counter)
+	}
+
+	return maxNumber, nil
 }
 
 func (a *App) activeCardTaskIDUsageForBoardLocked(boardID string, excludedBlockID string) (int, map[int]struct{}, error) {
@@ -771,6 +738,13 @@ func isActiveCardBlock(block *model.Block) bool {
 
 func isCardBlock(block *model.Block) bool {
 	return block != nil && block.Type == model.TypeCard
+}
+
+func maxInt(left int, right int) int {
+	if left > right {
+		return left
+	}
+	return right
 }
 
 func cardTaskIDCounterKey(boardID string) string {

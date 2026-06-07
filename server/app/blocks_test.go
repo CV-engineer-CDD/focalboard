@@ -235,8 +235,21 @@ func TestUndeleteBlock(t *testing.T) {
 			BlockType: model.TypeCard,
 		}).Return([]*model.Block{activeBlock, block}, nil)
 		th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
+			BoardID:   boardID,
 			BlockType: model.TypeCard,
 		}).Return([]*model.Block{activeBlock, block}, nil)
+		th.Store.EXPECT().GetDeletedBlocksForBoard(boardID).Return([]*model.Block{}, nil)
+		th.Store.EXPECT().GetSystemSetting(cardTaskIDCounterKey(boardID)).Return("", nil)
+		th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
+			BlockType: model.TypeCard,
+		}).Return([]*model.Block{activeBlock, block}, nil)
+		th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
+			BlockType: model.TypeCard,
+		}).Return([]*model.Block{activeBlock, block}, nil)
+		th.Store.EXPECT().GetDeletedBlocksWithType(string(model.TypeCard)).Return([]*model.Block{}, nil)
+		th.Store.EXPECT().SetSystemSetting(cardGlobalTaskIDCounterKey, "3090").Return(nil)
+		th.Store.EXPECT().GetSystemSetting(cardGlobalTaskIDCounterKey).Return("", nil)
+		th.Store.EXPECT().SetSystemSetting(cardTaskIDCounterKey(boardID), "3091").Return(nil)
 		th.Store.EXPECT().SetSystemSetting(cardGlobalTaskIDCounterKey, "3091").Return(nil)
 		th.Store.EXPECT().PatchBlock("old-card-3090", &model.BlockPatch{
 			UpdatedFields: map[string]interface{}{
@@ -254,6 +267,85 @@ func TestUndeleteBlock(t *testing.T) {
 		require.Equal(t, "#3091", undeletedBlock.Fields["taskId"])
 		require.Equal(t, "G-3091", undeletedBlock.Fields["globalTaskId"])
 		require.Equal(t, expectedProperties, undeletedBlock.Fields["properties"])
+	})
+
+	t.Run("card undelete does not lower counters reserved by deleted history", func(t *testing.T) {
+		boardID := testBoardID
+		board := &model.Board{ID: boardID}
+		block := &model.Block{
+			ID:      "old-card-100",
+			BoardID: board.ID,
+			Type:    model.TypeCard,
+			Fields: map[string]interface{}{
+				"taskId":       "#100",
+				"globalTaskId": "G-100",
+			},
+		}
+		activeBlock := &model.Block{
+			ID:      "active-card-200",
+			BoardID: board.ID,
+			Type:    model.TypeCard,
+			Fields: map[string]interface{}{
+				"taskId":       "#200",
+				"globalTaskId": "G-200",
+			},
+		}
+		deletedHighestBlock := &model.Block{
+			ID:       "deleted-card-36666",
+			BoardID:  board.ID,
+			Type:     model.TypeCard,
+			DeleteAt: 1680000000000,
+			Fields: map[string]interface{}{
+				"taskId":       "#36666",
+				"globalTaskId": "G-36666",
+			},
+		}
+		th.App.cardTaskIDMaxByBoard[boardID] = 36666
+		th.App.cardGlobalTaskIDMax = 36666
+		th.App.cardGlobalTaskIDCounterLoaded = true
+
+		th.Store.EXPECT().GetBlockHistory(
+			gomock.Eq("old-card-100"),
+			gomock.Eq(model.QueryBlockHistoryOptions{Limit: 1, Descending: true}),
+		).Return([]*model.Block{block}, nil)
+		th.Store.EXPECT().UndeleteBlock(gomock.Eq("old-card-100"), gomock.Eq("user-id-1")).Return(nil)
+		th.Store.EXPECT().GetBlock(gomock.Eq("old-card-100")).Return(block, nil)
+		th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
+			BoardID:   boardID,
+			BlockType: model.TypeCard,
+		}).Return([]*model.Block{activeBlock, block}, nil)
+		th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
+			BoardID:   boardID,
+			BlockType: model.TypeCard,
+		}).Return([]*model.Block{activeBlock, block}, nil)
+		th.Store.EXPECT().GetDeletedBlocksForBoard(boardID).Return([]*model.Block{deletedHighestBlock}, nil)
+		th.Store.EXPECT().GetSystemSetting(cardTaskIDCounterKey(boardID)).Return("36666", nil)
+		th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
+			BlockType: model.TypeCard,
+		}).Return([]*model.Block{activeBlock, block}, nil)
+		th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
+			BlockType: model.TypeCard,
+		}).Return([]*model.Block{activeBlock, block}, nil)
+		th.Store.EXPECT().GetDeletedBlocksWithType(string(model.TypeCard)).Return([]*model.Block{deletedHighestBlock}, nil)
+		th.Store.EXPECT().SetSystemSetting(cardGlobalTaskIDCounterKey, "36666").Return(nil)
+		th.Store.EXPECT().GetSystemSetting(cardGlobalTaskIDCounterKey).Return("36666", nil)
+		th.Store.EXPECT().SetSystemSetting(cardTaskIDCounterKey(boardID), "36666").Return(nil)
+		th.Store.EXPECT().SetSystemSetting(cardGlobalTaskIDCounterKey, "36666").Return(nil)
+		th.Store.EXPECT().PatchBlock("old-card-100", &model.BlockPatch{
+			UpdatedFields: map[string]interface{}{
+				"properties": map[string]interface{}{cardGlobalTaskIDProperty: "G-100"},
+			},
+		}, "user-id-1").Return(nil)
+		th.Store.EXPECT().GetBoard(boardID).Return(board, nil)
+		th.Store.EXPECT().GetMembersForBoard(boardID).Return([]*model.BoardMember{}, nil)
+
+		undeletedBlock, err := th.App.UndeleteBlock("old-card-100", "user-id-1")
+
+		require.NoError(t, err)
+		require.Equal(t, "#100", undeletedBlock.Fields["taskId"])
+		require.Equal(t, "G-100", undeletedBlock.Fields["globalTaskId"])
+		require.Equal(t, 36666, th.App.cardTaskIDMaxByBoard[boardID])
+		require.Equal(t, 36666, th.App.cardGlobalTaskIDMax)
 	})
 
 	t.Run("error scenario", func(t *testing.T) {
@@ -314,6 +406,72 @@ func TestPermanentlyDeleteBlock(t *testing.T) {
 
 		require.Error(t, err)
 		require.True(t, model.IsErrBadRequest(err))
+	})
+
+	t.Run("card permanent delete does not lower persisted counters", func(t *testing.T) {
+		boardID := testBoardID
+		board := &model.Board{ID: boardID}
+		block := &model.Block{
+			ID:       "deleted-card-100",
+			BoardID:  board.ID,
+			Type:     model.TypeCard,
+			DeleteAt: 1680000000000,
+			Fields: map[string]interface{}{
+				"taskId":       "#100",
+				"globalTaskId": "G-100",
+			},
+		}
+		activeBlock := &model.Block{
+			ID:      "active-card-200",
+			BoardID: board.ID,
+			Type:    model.TypeCard,
+			Fields: map[string]interface{}{
+				"taskId":       "#200",
+				"globalTaskId": "G-200",
+			},
+		}
+		deletedHighestBlock := &model.Block{
+			ID:       "deleted-card-36666",
+			BoardID:  board.ID,
+			Type:     model.TypeCard,
+			DeleteAt: 1680000000000,
+			Fields: map[string]interface{}{
+				"taskId":       "#36666",
+				"globalTaskId": "G-36666",
+			},
+		}
+		th.App.cardTaskIDMaxByBoard[boardID] = 36666
+		th.App.cardGlobalTaskIDMax = 36666
+		th.App.cardGlobalTaskIDCounterLoaded = true
+
+		th.Store.EXPECT().GetBlockHistory(
+			gomock.Eq("deleted-card-100"),
+			gomock.Eq(model.QueryBlockHistoryOptions{Limit: 1, Descending: true}),
+		).Return([]*model.Block{block}, nil)
+		th.Store.EXPECT().GetBoard(boardID).Return(board, nil)
+		th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
+			BoardID:   boardID,
+			BlockType: model.TypeCard,
+		}).Return([]*model.Block{activeBlock}, nil)
+		th.Store.EXPECT().GetDeletedBlocksForBoard(boardID).Return([]*model.Block{block, deletedHighestBlock}, nil)
+		th.Store.EXPECT().GetSystemSetting(cardTaskIDCounterKey(boardID)).Return("36666", nil)
+		th.Store.EXPECT().SetSystemSetting(cardTaskIDCounterKey(boardID), "36666").Return(nil)
+		th.Store.EXPECT().GetBlocks(model.QueryBlocksOptions{
+			BlockType: model.TypeCard,
+		}).Return([]*model.Block{activeBlock}, nil)
+		th.Store.EXPECT().GetDeletedBlocksWithType(string(model.TypeCard)).Return([]*model.Block{block, deletedHighestBlock}, nil)
+		th.Store.EXPECT().SetSystemSetting(cardGlobalTaskIDCounterKey, "36666").Return(nil)
+		th.Store.EXPECT().GetSystemSetting(cardGlobalTaskIDCounterKey).Return("36666", nil)
+		th.Store.EXPECT().SetSystemSetting(cardGlobalTaskIDCounterKey, "36666").Return(nil)
+		th.Store.EXPECT().PermanentlyDeleteBlock(gomock.Eq("deleted-card-100"), gomock.Eq("user-id-1")).Return(nil)
+		th.Store.EXPECT().GetMembersForBoard(boardID).Return([]*model.BoardMember{}, nil)
+
+		deletedBlock, err := th.App.PermanentlyDeleteBlock("deleted-card-100", "user-id-1")
+
+		require.NoError(t, err)
+		require.Equal(t, block, deletedBlock)
+		require.Equal(t, 36666, th.App.cardTaskIDMaxByBoard[boardID])
+		require.Equal(t, 36666, th.App.cardGlobalTaskIDMax)
 	})
 }
 
