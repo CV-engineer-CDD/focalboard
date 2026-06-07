@@ -19,7 +19,8 @@ release-archives/<package-name>.tar.gz
 | `focalboard-7.11.3-taskid-linux-loong64.tar.gz` | Deleted highest IDs could be reused; restore reassigned conflicts. | Kept for history, not recommended for stable code references. |
 | `focalboard-7.11.4-taskid-linux-loong64.tar.gz` | Added the Deleted cards dialog and restore UI. | Historical archive. |
 | `focalboard-7.11.5-taskid-linux-loong64.tar.gz` | Added confirmed permanent delete from Deleted cards. | Historical archive. |
-| `focalboard-7.11.6-taskid-linux-loong64.tar.gz` | Current preferred task ID build. External surfaces show global ID, card detail shows Board ID, Deleted cards display is fixed, and soft/permanent delete do not release IDs. | Recommended custom build. |
+| `focalboard-7.11.6-taskid-linux-loong64.tar.gz` | External surfaces show global ID, card detail shows Board ID, and Deleted cards display is fixed. Some restore/permanent-delete paths could still lower counters. | Historical archive. |
+| `focalboard-7.11.7-taskid-linux-loong64.tar.gz` | Fixes remaining restore and permanent-delete paths that could lower reserved counters, making the no-ID-reuse rule consistent. | Recommended custom build. |
 
 The `.zst` copies were intentionally removed. The committed artifacts are the
 Mattermost-uploadable `.tar.gz` plugin packages.

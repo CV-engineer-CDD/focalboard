@@ -115,6 +115,16 @@ Mattermost Boards 插件包期间的需求演进、实现调整、问题修复�
 - 实现：全局计数器初始化时会取 active cards 与 deleted card history 的最大值，修复从 `7.11.3` 升级后 deleted 最高号被遗忘的问题。
 - 验证：`webapp npm run check` 通过；`go test ./app -run '^(TestDeleteBlock|TestUndeleteBlock|TestPermanentlyDeleteBlock|TestCardTaskIDLifecycleUsesUniqueIDs|TestCreateCard|TestEnsureCardTaskIDs|TestNextCardGlobalTaskIDResetsTimestampCounter)$' -count=1` 通过；`go test ./api -run TestNonExistent -count=1` 通过。
 
+### `7.11.7-taskid-linux-loong64`
+
+- 问题：用户继续验证后反馈，部分情况下实际行为仍不是“软删除和永久删除都不释放编号”。
+- 原因：`7.11.6` 虽然取消了 soft delete 主路径的计数器回退，但恢复卡片时仍按“活动卡片最大编号”重写计数器；永久删除前的保留逻辑在缓存未加载或被删卡编号较小时，也可能把持久计数器降低。
+- 修复：恢复卡片时只用活动卡片判断编号冲突，但计数器必须取活动卡片、deleted card history、持久计数器和内存缓存中的最大值。
+- 修复：永久删除前只允许抬高 board/global 计数器，绝不允许用被永久删除卡片的较小编号覆盖更大的历史最大值。
+- 修复：恢复路径同步写入 board 级持久计数器 `focalboard_card_task_id_max_{boardID}`，避免恢复后重启再发号时丢失历史最大值。
+- 清理：删除旧的“删除后刷新/回退计数器”函数，避免以后误用重新引入编号复用。
+- 验证：`go test ./app -run '^(TestUndeleteBlock|TestPermanentlyDeleteBlock|TestDeleteBlock|TestCardTaskIDLifecycleUsesUniqueIDs|TestCreateCard|TestEnsureCardTaskIDs|TestNextCardGlobalTaskIDResetsTimestampCounter)$' -count=1` 通过；`go test ./model -run '^(TestBlock2Card|TestCard2BlockIncludesTaskID)$' -count=1` 通过；`go test ./api -run TestNonExistent -count=1` 通过。
+
 ## 需求演进
 
 ### 第一阶段：board 内唯一 ID
@@ -598,4 +608,5 @@ file mattermost-plugin/server/dist/plugin-linux-loong64
 | `release-archives/focalboard-7.11.3-taskid-linux-loong64.tar.gz` | 删除最高编号后可复用编号；保留作历史对比，不建议用于长期代码引用。 |
 | `release-archives/focalboard-7.11.4-taskid-linux-loong64.tar.gz` | 增加 `Deleted cards` 恢复弹窗。 |
 | `release-archives/focalboard-7.11.5-taskid-linux-loong64.tar.gz` | 增加 `Deleted cards` 中的永久删除。 |
-| `release-archives/focalboard-7.11.6-taskid-linux-loong64.tar.gz` | 当前推荐版本：外部显示全局 ID，详情显示 Board ID，修复 Deleted cards 显示/操作问题，软删除和永久删除都不释放编号。 |
+| `release-archives/focalboard-7.11.6-taskid-linux-loong64.tar.gz` | 外部显示全局 ID，详情显示 Board ID，修复 Deleted cards 显示/操作问题；仍存在部分恢复/永久删除路径会降低计数器的问题。 |
+| `release-archives/focalboard-7.11.7-taskid-linux-loong64.tar.gz` | 当前推荐版本：修复恢复和永久删除边界路径会降低历史最大编号的问题，确保软删除和永久删除都不释放编号。 |
