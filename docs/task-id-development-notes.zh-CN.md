@@ -125,6 +125,14 @@ Mattermost Boards 插件包期间的需求演进、实现调整、问题修复�
 - 清理：删除旧的“删除后刷新/回退计数器”函数，避免以后误用重新引入编号复用。
 - 验证：`go test ./app -run '^(TestUndeleteBlock|TestPermanentlyDeleteBlock|TestDeleteBlock|TestCardTaskIDLifecycleUsesUniqueIDs|TestCreateCard|TestEnsureCardTaskIDs|TestNextCardGlobalTaskIDResetsTimestampCounter)$' -count=1` 通过；`go test ./model -run '^(TestBlock2Card|TestCard2BlockIncludesTaskID)$' -count=1` 通过；`go test ./api -run TestNonExistent -count=1` 通过。
 
+### `7.11.8-taskid-linux-loong64`
+
+- 问题：用户反馈在 `Deleted cards` 弹窗中点击永久删除后，该卡片有时会重新变成内部字符串/`Untitled`，随后既删不掉也恢复不了。
+- 原因：永久删除成功后服务端会广播普通 block delete 事件。前端无法区分“已删除卡片被永久删除”和“活动卡片被软删除”，于是把只含 ID/deleteAt 的 websocket 占位块重新写入 `deletedCards`。
+- 修复：前端 `cards` store 增加 permanent-delete tombstone；本地永久删除成功后记录该 card ID，后续同 ID 删除广播会被忽略。
+- 修复：如果某张卡已经在 `deletedCards` 中，又收到只含默认字段的删除占位块，则视为永久删除广播，从 `deletedCards` 移除，而不是覆盖成字符串/`Untitled`。
+- 验证：`webapp npm run check` 通过。
+
 ## 需求演进
 
 ### 第一阶段：board 内唯一 ID
@@ -609,4 +617,5 @@ file mattermost-plugin/server/dist/plugin-linux-loong64
 | `release-archives/focalboard-7.11.4-taskid-linux-loong64.tar.gz` | 增加 `Deleted cards` 恢复弹窗。 |
 | `release-archives/focalboard-7.11.5-taskid-linux-loong64.tar.gz` | 增加 `Deleted cards` 中的永久删除。 |
 | `release-archives/focalboard-7.11.6-taskid-linux-loong64.tar.gz` | 外部显示全局 ID，详情显示 Board ID，修复 Deleted cards 显示/操作问题；仍存在部分恢复/永久删除路径会降低计数器的问题。 |
-| `release-archives/focalboard-7.11.7-taskid-linux-loong64.tar.gz` | 当前推荐版本：修复恢复和永久删除边界路径会降低历史最大编号的问题，确保软删除和永久删除都不释放编号。 |
+| `release-archives/focalboard-7.11.7-taskid-linux-loong64.tar.gz` | 修复恢复和永久删除边界路径会降低历史最大编号的问题，确保软删除和永久删除都不释放编号。 |
+| `release-archives/focalboard-7.11.8-taskid-linux-loong64.tar.gz` | 当前推荐版本：修复永久删除后 websocket 占位块把 Deleted cards 条目覆盖成字符串/`Untitled` 的问题。 |

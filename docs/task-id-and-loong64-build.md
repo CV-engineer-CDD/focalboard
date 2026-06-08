@@ -26,6 +26,8 @@ inside one board and `G-1` across boards.
   global ID to card surfaces, and shows the board ID in card details.
 - `7.11.7-taskid-linux-loong64`: fixed remaining restore and permanent-delete
   paths that could lower reserved counters in some cases.
+- `7.11.8-taskid-linux-loong64`: fixed permanent-delete websocket placeholders
+  reappearing as string/Untitled entries in Deleted cards.
 
 ## Card task ID behavior
 
@@ -157,8 +159,8 @@ make bundle
 Verify the final plugin package contains only the `linux-loong64` executable:
 
 ```bash
-tar -tzf mattermost-plugin/dist/focalboard-7.11.7.tar.gz | grep plugin-linux
-tar -xOzf mattermost-plugin/dist/focalboard-7.11.7.tar.gz focalboard/plugin.json
+tar -tzf mattermost-plugin/dist/focalboard-7.11.8.tar.gz | grep plugin-linux
+tar -xOzf mattermost-plugin/dist/focalboard-7.11.8.tar.gz focalboard/plugin.json
 file mattermost-plugin/server/dist/plugin-linux-loong64
 ```
 
@@ -177,4 +179,5 @@ Rollback and comparison packages are committed under `release-archives/`.
 | `release-archives/focalboard-7.11.4-taskid-linux-loong64.tar.gz` | Deleted cards restore dialog. |
 | `release-archives/focalboard-7.11.5-taskid-linux-loong64.tar.gz` | Permanent delete from Deleted cards. |
 | `release-archives/focalboard-7.11.6-taskid-linux-loong64.tar.gz` | Global ID display and Deleted cards fixes; historical archive because some counter-lowering paths remained. |
-| `release-archives/focalboard-7.11.7-taskid-linux-loong64.tar.gz` | Current preferred build; fixes restore and permanent-delete counter lowering. |
+| `release-archives/focalboard-7.11.7-taskid-linux-loong64.tar.gz` | Fixes restore and permanent-delete counter lowering. |
+| `release-archives/focalboard-7.11.8-taskid-linux-loong64.tar.gz` | Current preferred build; fixes permanent-delete websocket placeholders reappearing in Deleted cards. |
