@@ -28,6 +28,7 @@ type CardsState = {
     limitTimestamp: number
     cards: {[key: string]: Card}
     deletedCards?: {[key: string]: Card}
+    permanentlyDeletedCards?: {[key: string]: true}
     templates: {[key: string]: Card}
     cardHiddenWarning: boolean
 }
@@ -88,6 +89,10 @@ const deletedCardFromUpdate = (incoming: Card, state: CardsState): Card => {
     }
 }
 
+const isDeletePlaceholder = (card: Card): boolean => {
+    return !card.title && !card.fields.icon && !card.fields.globalTaskId && card.fields.taskId === card.id && Object.keys(card.fields.properties || {}).length === 0 && card.fields.contentOrder.length === 0
+}
+
 const cardsSlice = createSlice({
     name: 'cards',
     initialState: {
@@ -95,6 +100,7 @@ const cardsSlice = createSlice({
         limitTimestamp: 0,
         cards: {},
         deletedCards: {},
+        permanentlyDeletedCards: {},
         templates: {},
         cardHiddenWarning: false,
     } as CardsState,
@@ -111,13 +117,17 @@ const cardsSlice = createSlice({
         addCard: (state, action: PayloadAction<Card>) => {
             state.cards[action.payload.id] = action.payload
             state.deletedCards = state.deletedCards || {}
+            state.permanentlyDeletedCards = state.permanentlyDeletedCards || {}
             delete state.deletedCards[action.payload.id]
+            delete state.permanentlyDeletedCards[action.payload.id]
         },
         removeDeletedCard: (state, action: PayloadAction<string>) => {
             state.deletedCards = state.deletedCards || {}
+            state.permanentlyDeletedCards = state.permanentlyDeletedCards || {}
             delete state.deletedCards[action.payload]
             delete state.cards[action.payload]
             delete state.templates[action.payload]
+            state.permanentlyDeletedCards[action.payload] = true
         },
         showCardHiddenWarning: (state, action: PayloadAction<boolean>) => {
             state.cardHiddenWarning = action.payload
@@ -127,8 +137,22 @@ const cardsSlice = createSlice({
         },
         updateCards: (state: CardsState, action: PayloadAction<Card[]>) => {
             state.deletedCards = state.deletedCards || {}
+            state.permanentlyDeletedCards = state.permanentlyDeletedCards || {}
             for (const card of action.payload) {
                 if (card.deleteAt !== 0) {
+                    if (state.permanentlyDeletedCards[card.id]) {
+                        delete state.deletedCards[card.id]
+                        delete state.cards[card.id]
+                        delete state.templates[card.id]
+                        continue
+                    }
+                    if (state.deletedCards[card.id] && isDeletePlaceholder(card)) {
+                        delete state.deletedCards[card.id]
+                        delete state.cards[card.id]
+                        delete state.templates[card.id]
+                        state.permanentlyDeletedCards[card.id] = true
+                        continue
+                    }
                     const deletedCard = deletedCardFromUpdate(card, state)
                     delete state.cards[card.id]
                     delete state.templates[card.id]
@@ -136,9 +160,11 @@ const cardsSlice = createSlice({
                 } else if (card.fields.isTemplate) {
                     state.templates[card.id] = card
                     delete state.deletedCards[card.id]
+                    delete state.permanentlyDeletedCards[card.id]
                 } else {
                     state.cards[card.id] = card
                     delete state.deletedCards[card.id]
+                    delete state.permanentlyDeletedCards[card.id]
                 }
             }
         },
@@ -152,6 +178,7 @@ const cardsSlice = createSlice({
         builder.addCase(initialReadOnlyLoad.fulfilled, (state, action) => {
             state.cards = {}
             state.deletedCards = {}
+            state.permanentlyDeletedCards = {}
             state.templates = {}
             for (const block of action.payload.blocks) {
                 if (block.type === 'card' && block.deleteAt !== 0) {
@@ -169,6 +196,7 @@ const cardsSlice = createSlice({
         builder.addCase(loadBoardData.fulfilled, (state, action) => {
             state.cards = {}
             state.deletedCards = {}
+            state.permanentlyDeletedCards = {}
             state.templates = {}
             for (const block of action.payload.blocks) {
                 if (block.type === 'card' && block.deleteAt !== 0) {
